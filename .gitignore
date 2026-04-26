@@ -1,0 +1,10 @@
+/target/
+/.idea/
+/.vscode/
+/.vs/
+/desktop/build/
+*.user
+*.db-shm
+*.db-wal
+.tools/
+*.log
