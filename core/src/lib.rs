@@ -178,6 +178,21 @@ impl StickerStore {
         Ok(())
     }
 
+    pub fn delete_all_items(&self) -> Result<usize, StoreError> {
+        let connection = self.connection()?;
+        let records = self.list_items("")?;
+        let deleted_count = records.len();
+
+        connection.execute("DELETE FROM stickers", [])?;
+
+        for record in records {
+            self.remove_if_exists(Path::new(&record.asset_path))?;
+            self.remove_if_exists(Path::new(&record.thumb_path))?;
+        }
+
+        Ok(deleted_count)
+    }
+
     pub fn rename_item(&self, id: u64, new_name: &str) -> Result<StickerRecord, StoreError> {
         let trimmed_name = new_name.trim();
         if trimmed_name.is_empty() {
@@ -579,6 +594,40 @@ mod tests {
             store.get_item(record.id),
             Err(StoreError::NotFound)
         ));
+    }
+
+    #[test]
+    fn delete_all_removes_everything() {
+        let (_temp_dir, store) = setup_store();
+        let source_dir = TempDir::new().expect("source dir");
+        let first = source_dir.path().join("first.png");
+        let second = source_dir.path().join("second.png");
+        write_png(&first, [0, 0, 255, 255]);
+        write_png(&second, [255, 255, 0, 255]);
+
+        let imported = store
+            .import_items([
+                ImportRequest {
+                    path: first,
+                    name: Some("First".to_string()),
+                    original_filename: None,
+                },
+                ImportRequest {
+                    path: second,
+                    name: Some("Second".to_string()),
+                    original_filename: None,
+                },
+            ])
+            .expect("import");
+
+        let deleted_count = store.delete_all_items().expect("delete all");
+
+        assert_eq!(deleted_count, 2);
+        assert!(store.list_items("").expect("list").is_empty());
+        for record in imported {
+            assert!(!Path::new(&record.asset_path).exists());
+            assert!(!Path::new(&record.thumb_path).exists());
+        }
     }
 
     #[test]

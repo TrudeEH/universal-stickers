@@ -13,7 +13,12 @@ class StickerTile : public QFrame
     Q_OBJECT
 
 public:
-    explicit StickerTile(const universal_stickers::StickerRecord& record, QWidget* parent = nullptr);
+    explicit StickerTile(
+        const universal_stickers::StickerRecord& record,
+        int tileWidth,
+        int previewSize,
+        QWidget* parent = nullptr
+    );
 
 signals:
     void activated(quint64 id);

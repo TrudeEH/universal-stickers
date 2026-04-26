@@ -9,7 +9,12 @@
 #include <QStyle>
 #include <QVBoxLayout>
 
-StickerTile::StickerTile(const universal_stickers::StickerRecord& record, QWidget* parent)
+StickerTile::StickerTile(
+    const universal_stickers::StickerRecord& record,
+    int tileWidth,
+    int previewSize,
+    QWidget* parent
+)
     : QFrame(parent)
     , m_record(record)
 {
@@ -20,7 +25,7 @@ StickerTile::StickerTile(const universal_stickers::StickerRecord& record, QWidge
         "#stickerTile { border: 1px solid palette(mid); border-radius: 10px; background: palette(base); }"
         "#stickerTile:hover { border-color: palette(highlight); }"
     ));
-    setFixedWidth(180);
+    setFixedWidth(tileWidth);
     setSizePolicy(QSizePolicy::Fixed, QSizePolicy::Fixed);
 
     auto* layout = new QVBoxLayout(this);
@@ -54,7 +59,8 @@ StickerTile::StickerTile(const universal_stickers::StickerRecord& record, QWidge
 
     m_preview = new QLabel(this);
     m_preview->setAlignment(Qt::AlignCenter);
-    m_preview->setMinimumSize(140, 140);
+    m_preview->setMinimumSize(previewSize, previewSize);
+    m_preview->setMaximumSize(previewSize, previewSize);
     layout->addWidget(m_preview, 0, Qt::AlignCenter);
 
     m_name = new QLabel(qStringFromRust(m_record.name), this);
@@ -80,7 +86,7 @@ void StickerTile::setupPreview()
 
     if (qStringFromRust(m_record.kind) == QStringLiteral("gif")) {
         m_movie = std::make_unique<QMovie>(assetPath);
-        m_movie->setScaledSize(QSize(140, 140));
+        m_movie->setScaledSize(m_preview->maximumSize());
         m_preview->setMovie(m_movie.get());
         m_movie->start();
         return;
@@ -88,7 +94,9 @@ void StickerTile::setupPreview()
 
     QPixmap pixmap(thumbPath);
     if (!pixmap.isNull()) {
-        m_preview->setPixmap(pixmap.scaled(140, 140, Qt::KeepAspectRatio, Qt::SmoothTransformation));
+        m_preview->setPixmap(
+            pixmap.scaled(m_preview->maximumSize(), Qt::KeepAspectRatio, Qt::SmoothTransformation)
+        );
     } else {
         m_preview->setText(QStringLiteral("No preview"));
     }

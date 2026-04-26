@@ -4,6 +4,7 @@
 
 #include <QDragEnterEvent>
 #include <QDropEvent>
+#include <QActionGroup>
 #include <QFrame>
 #include <QFileDialog>
 #include <QFileInfo>
@@ -15,10 +16,12 @@
 #include <QLineEdit>
 #include <QMessageBox>
 #include <QMenu>
+#include <QMenuBar>
 #include <QMimeData>
 #include <QPushButton>
 #include <QResizeEvent>
 #include <QScrollArea>
+#include <QSettings>
 #include <QShowEvent>
 #include <QSizePolicy>
 #include <QStatusBar>
@@ -28,9 +31,22 @@
 
 namespace {
 
-constexpr int kTileWidth = 180;
 constexpr int kGridSpacing = 12;
 constexpr int kGridMargin = 4;
+constexpr int kDefaultDisplaySizeIndex = 1;
+constexpr auto kDisplaySizeSettingKey = "ui/displaySizeIndex";
+
+struct DisplaySizePreset {
+    const char* label;
+    int tileWidth;
+    int previewSize;
+};
+
+constexpr DisplaySizePreset kDisplaySizePresets[] = {
+    {"Compact", 150, 110},
+    {"Comfortable", 180, 140},
+    {"Large", 220, 180},
+};
 
 bool isSupportedImportPath(const QString& path)
 {
@@ -69,6 +85,13 @@ MainWindow::MainWindow(rust::Box<universal_stickers::StickerLibrary> library, QW
     : QMainWindow(parent)
     , m_library(std::move(library))
 {
+    QSettings settings;
+    m_displaySizeIndex = std::clamp(
+        settings.value(QLatin1StringView(kDisplaySizeSettingKey), kDefaultDisplaySizeIndex).toInt(),
+        0,
+        static_cast<int>(std::size(kDisplaySizePresets)) - 1
+    );
+
     buildUi();
 
     connect(m_searchEdit, &QLineEdit::textChanged, this, &MainWindow::reloadItems);
@@ -210,6 +233,48 @@ void MainWindow::importBackup()
     }
 }
 
+void MainWindow::deleteAllItems()
+{
+    if (m_records.empty()) {
+        statusBar()->showMessage(QStringLiteral("There are no stickers to delete"), 2500);
+        return;
+    }
+
+    const auto reply = QMessageBox::warning(
+        this,
+        QStringLiteral("Delete All Stickers"),
+        QStringLiteral("Delete all %1 stickers from the library? This cannot be undone.")
+            .arg(static_cast<qulonglong>(m_records.size())),
+        QMessageBox::Yes | QMessageBox::Cancel,
+        QMessageBox::Cancel
+    );
+    if (reply != QMessageBox::Yes) {
+        return;
+    }
+
+    try {
+        const std::size_t deletedCount = m_library->delete_all_items();
+        reloadItems();
+        statusBar()->showMessage(
+            QStringLiteral("Deleted %1 sticker(s)").arg(static_cast<qulonglong>(deletedCount)),
+            5000
+        );
+    } catch (const std::exception& error) {
+        showRustError(QStringLiteral("deleting all stickers"), error);
+    }
+}
+
+void MainWindow::setDisplaySize(int index)
+{
+    if (index < 0 || index >= static_cast<int>(std::size(kDisplaySizePresets))) {
+        return;
+    }
+
+    m_displaySizeIndex = index;
+    QSettings().setValue(QLatin1StringView(kDisplaySizeSettingKey), m_displaySizeIndex);
+    rebuildGrid();
+}
+
 void MainWindow::importPaths(const QStringList& paths)
 {
     QStringList acceptedPaths;
@@ -318,8 +383,30 @@ void MainWindow::toggleWindow()
 void MainWindow::buildUi()
 {
     setWindowTitle(QStringLiteral("Universal Stickers"));
-    resize(980, 720);
+    resize(1040, 720);
     setAcceptDrops(true);
+
+    auto* fileMenu = menuBar()->addMenu(QStringLiteral("File"));
+    fileMenu->addAction(QStringLiteral("Add Stickers"), this, &MainWindow::importItems);
+    fileMenu->addSeparator();
+    fileMenu->addAction(QStringLiteral("Export Backup"), this, &MainWindow::exportBackup);
+    fileMenu->addAction(QStringLiteral("Import Backup"), this, &MainWindow::importBackup);
+
+    auto* libraryMenu = menuBar()->addMenu(QStringLiteral("Library"));
+    libraryMenu->addAction(QStringLiteral("Delete All Stickers"), this, &MainWindow::deleteAllItems);
+
+    auto* viewMenu = menuBar()->addMenu(QStringLiteral("View"));
+    auto* sizeActionGroup = new QActionGroup(this);
+    sizeActionGroup->setExclusive(true);
+    for (int index = 0; index < static_cast<int>(std::size(kDisplaySizePresets)); ++index) {
+        QAction* action = viewMenu->addAction(QString::fromUtf8(kDisplaySizePresets[index].label));
+        action->setCheckable(true);
+        action->setChecked(index == m_displaySizeIndex);
+        sizeActionGroup->addAction(action);
+        connect(action, &QAction::triggered, this, [this, index]() {
+            setDisplaySize(index);
+        });
+    }
 
     auto* central = new QWidget(this);
     auto* rootLayout = new QVBoxLayout(central);
@@ -327,37 +414,63 @@ void MainWindow::buildUi()
     rootLayout->setSpacing(12);
 
     auto* headerLayout = new QHBoxLayout();
+    headerLayout->setContentsMargins(0, 0, 0, 0);
+    headerLayout->setSpacing(10);
+
     m_searchEdit = new QLineEdit(central);
     m_searchEdit->setPlaceholderText(QStringLiteral("Search stickers"));
-    m_searchEdit->setMinimumWidth(220);
+    m_searchEdit->setMinimumWidth(260);
     m_searchEdit->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Fixed);
-    m_addButton = new QPushButton(QStringLiteral("Add"), central);
-    m_backupButton = new QPushButton(QStringLiteral("Backup"), central);
-    m_backupButton->setText(QStringLiteral("Backup"));
-    auto* backupMenu = new QMenu(m_backupButton);
-    backupMenu->addAction(QStringLiteral("Export All"), this, &MainWindow::exportBackup);
-    backupMenu->addAction(QStringLiteral("Import Backup"), this, &MainWindow::importBackup);
-    m_backupButton->setMenu(backupMenu);
     headerLayout->addWidget(m_searchEdit, 1);
+
+    m_addButton = new QPushButton(QStringLiteral("Add"), central);
     headerLayout->addWidget(m_addButton, 0);
-    headerLayout->addWidget(m_backupButton, 0);
+
     rootLayout->addLayout(headerLayout);
 
     m_scrollArea = new QScrollArea(central);
     m_scrollArea->setWidgetResizable(true);
     m_scrollArea->setFrameShape(QFrame::NoFrame);
+    m_scrollArea->setAlignment(Qt::AlignTop);
 
-    m_gridContainer = new QWidget(m_scrollArea);
+    m_scrollContent = new QWidget(m_scrollArea);
+    m_scrollContent->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
+    auto* gridWrapperLayout = new QHBoxLayout(m_scrollContent);
+    gridWrapperLayout->setContentsMargins(0, 0, 0, 0);
+    gridWrapperLayout->setSpacing(0);
+    gridWrapperLayout->setAlignment(Qt::AlignTop);
+
+    m_gridSpacerLeft = new QWidget(m_scrollContent);
+    m_gridSpacerLeft->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    gridWrapperLayout->addWidget(m_gridSpacerLeft, 1);
+
+    m_gridContainer = new QWidget(m_scrollContent);
     m_gridContainer->setSizePolicy(QSizePolicy::Preferred, QSizePolicy::Maximum);
     m_gridLayout = new QGridLayout(m_gridContainer);
     m_gridLayout->setContentsMargins(4, 4, 4, 4);
     m_gridLayout->setHorizontalSpacing(12);
     m_gridLayout->setVerticalSpacing(12);
-    m_gridLayout->setAlignment(Qt::AlignTop | Qt::AlignLeft);
-    m_scrollArea->setWidget(m_gridContainer);
+    m_gridLayout->setAlignment(Qt::AlignTop | Qt::AlignHCenter);
+    gridWrapperLayout->addWidget(m_gridContainer, 0, Qt::AlignTop);
+
+    m_gridSpacerRight = new QWidget(m_scrollContent);
+    m_gridSpacerRight->setSizePolicy(QSizePolicy::Expanding, QSizePolicy::Preferred);
+    gridWrapperLayout->addWidget(m_gridSpacerRight, 1);
+
+    m_scrollArea->setWidget(m_scrollContent);
     rootLayout->addWidget(m_scrollArea, 1);
 
     setCentralWidget(central);
+}
+
+int MainWindow::currentTileWidth() const
+{
+    return kDisplaySizePresets[m_displaySizeIndex].tileWidth;
+}
+
+int MainWindow::currentPreviewSize() const
+{
+    return kDisplaySizePresets[m_displaySizeIndex].previewSize;
 }
 
 int MainWindow::calculateColumnCount() const
@@ -376,7 +489,7 @@ int MainWindow::calculateColumnCount() const
     }
 
     const int usableWidth = std::max(0, availableWidth - (2 * kGridMargin));
-    return std::max(1, (usableWidth + kGridSpacing) / (kTileWidth + kGridSpacing));
+    return std::max(1, (usableWidth + kGridSpacing) / (currentTileWidth() + kGridSpacing));
 }
 
 void MainWindow::rebuildGrid()
@@ -404,15 +517,20 @@ void MainWindow::rebuildGrid()
         const int row = index / columns;
         const int column = index % columns;
 
-        auto* tile = new StickerTile(m_records[static_cast<std::size_t>(index)], m_gridContainer);
+        auto* tile = new StickerTile(
+            m_records[static_cast<std::size_t>(index)],
+            currentTileWidth(),
+            currentPreviewSize(),
+            m_gridContainer
+        );
         connect(tile, &StickerTile::activated, this, &MainWindow::copyItem);
         connect(tile, &StickerTile::editRequested, this, &MainWindow::editItem);
         connect(tile, &StickerTile::deleteRequested, this, &MainWindow::deleteItem);
-        m_gridLayout->addWidget(tile, row, column, Qt::AlignTop | Qt::AlignLeft);
+        m_gridLayout->addWidget(tile, row, column, Qt::AlignTop | Qt::AlignHCenter);
     }
 
     const int contentWidth =
-        (columns * kTileWidth) +
+        (columns * currentTileWidth()) +
         ((columns - 1) * kGridSpacing) +
         (2 * kGridMargin);
     m_gridContainer->setMinimumWidth(contentWidth);

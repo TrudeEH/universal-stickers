@@ -36,6 +36,8 @@ private slots:
     void importItems();
     void exportBackup();
     void importBackup();
+    void deleteAllItems();
+    void setDisplaySize(int index);
     void deleteItem(quint64 id, const QString& name);
     void editItem(quint64 id, const QString& currentName);
     void copyItem(quint64 id);
@@ -43,6 +45,8 @@ private slots:
 
 private:
     void buildUi();
+    int currentTileWidth() const;
+    int currentPreviewSize() const;
     int calculateColumnCount() const;
     void rebuildGrid();
     void clearGrid();
@@ -54,10 +58,13 @@ private:
     HotkeyService m_hotkeyService;
     QLineEdit* m_searchEdit = nullptr;
     QPushButton* m_addButton = nullptr;
-    QPushButton* m_backupButton = nullptr;
     QScrollArea* m_scrollArea = nullptr;
+    QWidget* m_scrollContent = nullptr;
+    QWidget* m_gridSpacerLeft = nullptr;
+    QWidget* m_gridSpacerRight = nullptr;
     QWidget* m_gridContainer = nullptr;
     QGridLayout* m_gridLayout = nullptr;
     std::vector<universal_stickers::StickerRecord> m_records;
+    int m_displaySizeIndex = 1;
     int m_currentColumns = 0;
 };

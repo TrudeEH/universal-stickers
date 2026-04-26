@@ -29,6 +29,7 @@ mod ffi {
             names: Vec<String>,
         ) -> Result<Vec<StickerRecord>>;
         fn delete_item(self: &StickerLibrary, id: u64) -> Result<()>;
+        fn delete_all_items(self: &StickerLibrary) -> Result<usize>;
         fn get_item(self: &StickerLibrary, id: u64) -> Result<StickerRecord>;
         fn rename_item(self: &StickerLibrary, id: u64, new_name: String) -> Result<StickerRecord>;
         fn export_backup(self: &StickerLibrary, target_dir: String) -> Result<String>;
@@ -72,6 +73,10 @@ impl StickerLibrary {
     fn delete_item(&self, id: u64) -> Result<()> {
         self.store.delete_item(id)?;
         Ok(())
+    }
+
+    fn delete_all_items(&self) -> Result<usize> {
+        Ok(self.store.delete_all_items()?)
     }
 
     fn get_item(&self, id: u64) -> Result<ffi::StickerRecord> {
