@@ -29,9 +29,11 @@ cleanup:
 
 modules:
   - name: universal-stickers
-    buildsystem: cmake-ninja
-    config-opts:
-      - -DCMAKE_BUILD_TYPE=Release
+    buildsystem: simple
+    build-commands:
+      - cmake -S desktop -B build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_INSTALL_PREFIX=/app
+      - cmake --build build
+      - cmake --install build
     sources:
       - type: dir
-        path: ..
+        path: ../..
