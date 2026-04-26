@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Universal Stickers
+Comment=Sticker and GIF picker
+Exec=universal-stickers
+Icon=universal-stickers
+Categories=Utility;Graphics;
+Terminal=false

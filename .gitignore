@@ -8,3 +8,5 @@
 *.db-wal
 .tools/
 *.log
+desktop/resources/icons/*.png
+desktop/resources/icons/*.ico

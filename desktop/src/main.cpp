@@ -1,15 +1,45 @@
 #include <QApplication>
+#include <QIcon>
 #include <QMessageBox>
+#include <QPainter>
+#include <QPixmap>
 #include <QStandardPaths>
+#include <QSvgRenderer>
 
 #include "MainWindow.h"
 #include "RustBridge.h"
+
+namespace {
+
+QIcon loadAppIcon()
+{
+    QSvgRenderer renderer(QStringLiteral(":/icons/icon.svg"));
+    if (!renderer.isValid()) {
+        return {};
+    }
+
+    QIcon icon;
+    for (const int size : {16, 24, 32, 48, 64, 128, 256}) {
+        QPixmap pixmap(size, size);
+        pixmap.fill(Qt::transparent);
+
+        QPainter painter(&pixmap);
+        renderer.render(&painter);
+        icon.addPixmap(pixmap);
+    }
+
+    return icon;
+}
+
+}
 
 int main(int argc, char* argv[])
 {
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Universal Stickers"));
     QApplication::setOrganizationName(QStringLiteral("UniversalStickers"));
+    QApplication::setDesktopFileName(QStringLiteral("universal-stickers"));
+    QApplication::setWindowIcon(loadAppIcon());
 
     try {
         const QString dataDir = QStandardPaths::writableLocation(QStandardPaths::AppDataLocation);

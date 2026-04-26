@@ -1,6 +1,8 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UniversalStickersDesktop LANGUAGES CXX)
+project(UniversalStickersDesktop VERSION 0.1.0 LANGUAGES CXX)
+
+include(GNUInstallDirs)
 
 set(CMAKE_AUTOMOC ON)
 set(CMAKE_AUTORCC ON)
@@ -8,7 +10,7 @@ set(CMAKE_AUTOUIC ON)
 set(CMAKE_CXX_STANDARD 17)
 set(CMAKE_CXX_STANDARD_REQUIRED ON)
 
-find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets)
+find_package(Qt6 REQUIRED COMPONENTS Core Gui Widgets Svg)
 find_package(Qt6 QUIET COMPONENTS DBus)
 find_package(KF6GlobalAccel QUIET)
 
@@ -16,16 +18,35 @@ find_program(CARGO_EXECUTABLE cargo REQUIRED)
 
 set(CARGO_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/cargo-target)
 set(RUST_CARGO_BUILD_ARGS)
+set(RUST_CARGO_PROFILE debug)
 set(RUST_CXXBRIDGE_DIR ${CARGO_TARGET_DIR}/cxxbridge)
+set(UNIVERSAL_STICKERS_ICON_SVG "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg")
+set(UNIVERSAL_STICKERS_WINDOWS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/universal-stickers.ico")
+set(UNIVERSAL_STICKERS_WINDOWS_RC)
+
+if(CMAKE_BUILD_TYPE MATCHES "^(Release|RelWithDebInfo|MinSizeRel)$")
+    set(RUST_CARGO_PROFILE release)
+    list(APPEND RUST_CARGO_BUILD_ARGS --release)
+endif()
+
+if(WIN32 AND EXISTS "${UNIVERSAL_STICKERS_WINDOWS_ICON}")
+    file(TO_NATIVE_PATH "${UNIVERSAL_STICKERS_WINDOWS_ICON}" UNIVERSAL_STICKERS_WINDOWS_ICON_NATIVE)
+    configure_file(
+        "${CMAKE_CURRENT_SOURCE_DIR}/resources/app.rc.in"
+        "${CMAKE_CURRENT_BINARY_DIR}/universal-stickers.rc"
+        @ONLY
+    )
+    set(UNIVERSAL_STICKERS_WINDOWS_RC "${CMAKE_CURRENT_BINARY_DIR}/universal-stickers.rc")
+endif()
 
 if(WIN32 AND CMAKE_CXX_COMPILER_ID STREQUAL "GNU")
     set(RUST_CARGO_TARGET x86_64-pc-windows-gnu)
     list(APPEND RUST_CARGO_BUILD_ARGS --target ${RUST_CARGO_TARGET})
-    set(RUST_STATIC_LIB ${CARGO_TARGET_DIR}/${RUST_CARGO_TARGET}/debug/libuniversal_stickers_ffi.a)
+    set(RUST_STATIC_LIB ${CARGO_TARGET_DIR}/${RUST_CARGO_TARGET}/${RUST_CARGO_PROFILE}/libuniversal_stickers_ffi.a)
 elseif(WIN32)
-    set(RUST_STATIC_LIB ${CARGO_TARGET_DIR}/debug/universal_stickers_ffi.lib)
+    set(RUST_STATIC_LIB ${CARGO_TARGET_DIR}/${RUST_CARGO_PROFILE}/universal_stickers_ffi.lib)
 else()
-    set(RUST_STATIC_LIB ${CARGO_TARGET_DIR}/debug/libuniversal_stickers_ffi.a)
+    set(RUST_STATIC_LIB ${CARGO_TARGET_DIR}/${RUST_CARGO_PROFILE}/libuniversal_stickers_ffi.a)
 endif()
 set(RUST_BRIDGE_CC ${RUST_CXXBRIDGE_DIR}/universal-stickers-ffi/src/lib.rs.cc)
 set_source_files_properties(${RUST_BRIDGE_CC} PROPERTIES GENERATED TRUE SKIP_AUTOGEN TRUE SKIP_AUTOMOC TRUE)
@@ -64,9 +85,12 @@ add_executable(universal-stickers
     src/HotkeyService.cpp
     src/HotkeyService.h
     src/RustBridge.h
+    resources/universal-stickers.qrc
+    ${UNIVERSAL_STICKERS_WINDOWS_RC}
 )
 
 add_dependencies(universal-stickers rust_ffi)
+set_target_properties(universal-stickers PROPERTIES WIN32_EXECUTABLE TRUE)
 
 target_include_directories(universal-stickers PRIVATE
     src
@@ -77,6 +101,7 @@ target_include_directories(universal-stickers PRIVATE
 target_link_libraries(universal-stickers PRIVATE
     Qt6::Core
     Qt6::Gui
+    Qt6::Svg
     Qt6::Widgets
     ${RUST_STATIC_LIB}
 )
@@ -95,3 +120,65 @@ if(WIN32)
 elseif(UNIX AND NOT APPLE)
     target_link_libraries(universal-stickers PRIVATE dl pthread m)
 endif()
+
+install(TARGETS universal-stickers
+    RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
+)
+
+if(WIN32)
+    qt_generate_deploy_app_script(
+        TARGET universal-stickers
+        OUTPUT_SCRIPT universal_stickers_deploy_script
+        NO_UNSUPPORTED_PLATFORM_ERROR
+        NO_TRANSLATIONS
+    )
+    install(SCRIPT ${universal_stickers_deploy_script})
+elseif(UNIX AND NOT APPLE)
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/universal-stickers.desktop.in
+        ${CMAKE_CURRENT_BINARY_DIR}/universal-stickers.desktop
+        @ONLY
+    )
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/universal-stickers.desktop
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+    )
+    install(
+        FILES ${UNIVERSAL_STICKERS_ICON_SVG}
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
+        RENAME universal-stickers.svg
+    )
+endif()
+
+install(
+    FILES
+        "${CMAKE_CURRENT_SOURCE_DIR}/../README.md"
+        "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt"
+    DESTINATION ${CMAKE_INSTALL_DATADIR}/doc/universal-stickers
+)
+
+set(CPACK_PACKAGE_NAME "universal-stickers")
+set(CPACK_PACKAGE_VENDOR "Universal Stickers")
+set(CPACK_PACKAGE_CONTACT "Universal Stickers Maintainers")
+set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Small sticker and GIF picker built with Qt and Rust.")
+set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../README.md")
+set(CPACK_PACKAGE_INSTALL_DIRECTORY "Universal Stickers")
+set(CPACK_PACKAGE_EXECUTABLES "universal-stickers" "Universal Stickers")
+set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
+set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt")
+set(CPACK_SOURCE_IGNORE_FILES "/build/;/.git/;/.idea/;/.vscode/;/.vs/;\\\\.user$")
+
+if(WIN32)
+    set(CPACK_WIX_VERSION 4)
+    set(CPACK_WIX_UPGRADE_GUID "5BA0C74F-4651-4EA5-AB10-B147CC1F2057")
+    if(EXISTS "${UNIVERSAL_STICKERS_WINDOWS_ICON}")
+        set(CPACK_WIX_PRODUCT_ICON "${UNIVERSAL_STICKERS_WINDOWS_ICON}")
+    endif()
+elseif(UNIX AND NOT APPLE)
+    set(CPACK_DEBIAN_FILE_NAME DEB-DEFAULT)
+    set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Universal Stickers Maintainers")
+    set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
+    set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+endif()
+
+include(CPack)
