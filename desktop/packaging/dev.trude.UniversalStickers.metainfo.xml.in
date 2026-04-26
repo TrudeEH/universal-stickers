@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>@UNIVERSAL_STICKERS_APP_ID@</id>
+  <name>Universal Stickers</name>
+  <summary>Sticker and GIF picker</summary>
+  <metadata_license>MIT</metadata_license>
+  <project_license>MIT</project_license>
+  <developer_name>Universal Stickers Maintainers</developer_name>
+  <launchable type="desktop-id">@UNIVERSAL_STICKERS_APP_ID@.desktop</launchable>
+  <url type="homepage">https://github.com/TrudeEH/universal-stickers</url>
+  <description>
+    <p>
+      Universal Stickers is a small desktop sticker and GIF picker built with Qt
+      and Rust.
+    </p>
+    <p>
+      It keeps a searchable local library of stickers, supports import and
+      backup workflows, and can copy selected items directly to the clipboard
+      for use in other applications.
+    </p>
+  </description>
+  <content_rating type="oars-1.1"/>
+  <provides>
+    <binary>universal-stickers</binary>
+  </provides>
+</component>

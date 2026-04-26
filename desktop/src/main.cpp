@@ -38,7 +38,7 @@ int main(int argc, char* argv[])
     QApplication app(argc, argv);
     QApplication::setApplicationName(QStringLiteral("Universal Stickers"));
     QApplication::setOrganizationName(QStringLiteral("UniversalStickers"));
-    QApplication::setDesktopFileName(QStringLiteral("universal-stickers"));
+    QApplication::setDesktopFileName(QStringLiteral("dev.trude.UniversalStickers"));
     QApplication::setWindowIcon(loadAppIcon());
 
     try {

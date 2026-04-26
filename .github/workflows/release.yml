@@ -51,7 +51,7 @@ jobs:
         if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev qt6-svg-dev dpkg-dev
+          sudo apt-get install -y cmake ninja-build qt6-base-dev qt6-svg-dev dpkg-dev rpm
 
       - name: Install Inkscape on Windows
         if: runner.os == 'Windows'
@@ -92,11 +92,12 @@ jobs:
           cpack --config desktop/build/CPackConfig.cmake -C Release -G ZIP -B dist
           cpack --config desktop/build/CPackConfig.cmake -C Release -G WIX -B dist
 
-      - name: Package Linux artifact
+      - name: Package Linux artifacts
         if: runner.os == 'Linux'
         run: |
           mkdir -p dist
           cpack --config desktop/build/CPackConfig.cmake -C Release -G DEB -B dist
+          cpack --config desktop/build/CPackConfig.cmake -C Release -G RPM -B dist
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
@@ -106,11 +107,39 @@ jobs:
             dist/*.zip
             dist/*.msi
             dist/*.deb
+            dist/*.rpm
+          if-no-files-found: error
+
+  flatpak:
+    name: Build Flatpak
+    runs-on: ubuntu-latest
+    container:
+      image: ghcr.io/flathub-infra/flatpak-github-actions:gnome-48
+      options: --privileged
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Build Flatpak bundle
+        uses: flatpak/flatpak-github-actions/flatpak-builder@v6
+        with:
+          bundle: universal-stickers-linux.flatpak
+          manifest-path: desktop/packaging/dev.trude.UniversalStickers.yml
+          upload-artifact: false
+
+      - name: Upload Flatpak artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-stickers-flatpak
+          path: universal-stickers-linux.flatpak
           if-no-files-found: error
 
   release:
     name: Publish release
-    needs: build
+    needs:
+      - build
+      - flatpak
     runs-on: ubuntu-latest
 
     steps:
@@ -133,5 +162,7 @@ jobs:
             release-assets/**/*.zip
             release-assets/**/*.msi
             release-assets/**/*.deb
+            release-assets/**/*.rpm
+            release-assets/**/*.flatpak
           body: |
             Automated build artifacts for commit `${{ github.sha }}` on `${{ github.ref_name }}`.

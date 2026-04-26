@@ -1,6 +1,11 @@
 cmake_minimum_required(VERSION 3.21)
 
-project(UniversalStickersDesktop VERSION 0.1.0 LANGUAGES CXX)
+project(
+    UniversalStickersDesktop
+    VERSION 0.1.0
+    HOMEPAGE_URL "https://github.com/TrudeEH/universal-stickers"
+    LANGUAGES CXX
+)
 
 include(GNUInstallDirs)
 
@@ -20,6 +25,7 @@ set(CARGO_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/cargo-target)
 set(RUST_CARGO_BUILD_ARGS)
 set(RUST_CARGO_PROFILE debug)
 set(RUST_CXXBRIDGE_DIR ${CARGO_TARGET_DIR}/cxxbridge)
+set(UNIVERSAL_STICKERS_APP_ID "dev.trude.UniversalStickers")
 set(UNIVERSAL_STICKERS_ICON_SVG "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg")
 set(UNIVERSAL_STICKERS_WINDOWS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/universal-stickers.ico")
 set(UNIVERSAL_STICKERS_WINDOWS_ICON_RC "${UNIVERSAL_STICKERS_WINDOWS_ICON}")
@@ -135,18 +141,27 @@ if(WIN32)
     install(SCRIPT ${universal_stickers_deploy_script})
 elseif(UNIX AND NOT APPLE)
     configure_file(
-        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/universal-stickers.desktop.in
-        ${CMAKE_CURRENT_BINARY_DIR}/universal-stickers.desktop
+        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/dev.trude.UniversalStickers.desktop.in
+        ${CMAKE_CURRENT_BINARY_DIR}/${UNIVERSAL_STICKERS_APP_ID}.desktop
+        @ONLY
+    )
+    configure_file(
+        ${CMAKE_CURRENT_SOURCE_DIR}/packaging/dev.trude.UniversalStickers.metainfo.xml.in
+        ${CMAKE_CURRENT_BINARY_DIR}/${UNIVERSAL_STICKERS_APP_ID}.metainfo.xml
         @ONLY
     )
     install(
-        FILES ${CMAKE_CURRENT_BINARY_DIR}/universal-stickers.desktop
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/${UNIVERSAL_STICKERS_APP_ID}.desktop
         DESTINATION ${CMAKE_INSTALL_DATADIR}/applications
+    )
+    install(
+        FILES ${CMAKE_CURRENT_BINARY_DIR}/${UNIVERSAL_STICKERS_APP_ID}.metainfo.xml
+        DESTINATION ${CMAKE_INSTALL_DATADIR}/metainfo
     )
     install(
         FILES ${UNIVERSAL_STICKERS_ICON_SVG}
         DESTINATION ${CMAKE_INSTALL_DATADIR}/icons/hicolor/scalable/apps
-        RENAME universal-stickers.svg
+        RENAME ${UNIVERSAL_STICKERS_APP_ID}.svg
     )
 endif()
 
@@ -164,6 +179,7 @@ set(CPACK_PACKAGE_DESCRIPTION_SUMMARY "Small sticker and GIF picker built with Q
 set(CPACK_PACKAGE_DESCRIPTION_FILE "${CMAKE_CURRENT_SOURCE_DIR}/../README.md")
 set(CPACK_PACKAGE_INSTALL_DIRECTORY "Universal Stickers")
 set(CPACK_PACKAGE_EXECUTABLES "universal-stickers" "Universal Stickers")
+set(CPACK_PACKAGE_HOMEPAGE_URL "${CMAKE_PROJECT_HOMEPAGE_URL}")
 set(CPACK_PACKAGE_VERSION ${PROJECT_VERSION})
 set(CPACK_RESOURCE_FILE_LICENSE "${CMAKE_CURRENT_SOURCE_DIR}/../LICENSE.txt")
 set(CPACK_SOURCE_IGNORE_FILES "/build/;/.git/;/.idea/;/.vscode/;/.vs/;\\\\.user$")
@@ -179,6 +195,10 @@ elseif(UNIX AND NOT APPLE)
     set(CPACK_DEBIAN_PACKAGE_MAINTAINER "Universal Stickers Maintainers")
     set(CPACK_DEBIAN_PACKAGE_SECTION "utils")
     set(CPACK_DEBIAN_PACKAGE_SHLIBDEPS ON)
+    set(CPACK_RPM_FILE_NAME RPM-DEFAULT)
+    set(CPACK_RPM_PACKAGE_LICENSE "MIT")
+    set(CPACK_RPM_PACKAGE_GROUP "Applications/Utilities")
+    set(CPACK_RPM_PACKAGE_RELEASE 1)
 endif()
 
 include(CPack)
