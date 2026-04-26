@@ -53,13 +53,22 @@ The Rust core uses bundled SQLite through `rusqlite`, so you do not need to inst
 
 ## Windows Setup
 
-The helper script expects a repo-local Qt toolchain under `.tools/qt` with this layout:
+For the helper script path, install:
 
-- `.tools/qt/Tools/CMake_64/bin/cmake.exe`
-- `.tools/qt/Tools/mingw1310_64/bin`
-- `.tools/qt/6.8.3/mingw_64/bin`
+- Rust with `cargo` and `rustup`
+- Python 3 with `pip`
 
-That matches the local build setup currently used by this project.
+On first run, `run.ps1` bootstraps a repo-local Qt toolchain under `.tools/qt` and installs:
+
+- CMake under `.tools/qt/Tools/CMake_64`
+- MinGW under `.tools/qt/Tools/mingw1310_64`
+- Qt 6.8.3 under `.tools/qt/6.8.3/mingw_64`
+
+If the GNU Rust target is missing, the script also runs:
+
+```powershell
+rustup target add x86_64-pc-windows-gnu
+```
 
 If you already have your own Qt installation elsewhere, you can still build manually by pointing CMake at your Qt prefix instead of using `run.ps1`.
 
@@ -111,7 +120,7 @@ The desktop build automatically invokes Cargo for `universal-stickers-ffi` and l
 
 ## Windows Helper Script
 
-If `.tools/qt` is set up as described above:
+On Windows, from a clean checkout:
 
 ```powershell
 .\run.ps1
@@ -125,7 +134,10 @@ Build without launching:
 
 What `run.ps1` does:
 
-- configures the desktop build with CMake + Ninja
+- bootstraps the repo-local Qt/CMake/MinGW toolchain under `.tools/qt` when it is missing
+- ensures the Rust target `x86_64-pc-windows-gnu` is installed
+- configures the desktop build with CMake
+- falls back to `MinGW Makefiles` if `ninja.exe` is not available
 - builds the Qt app
 - runs `windeployqt` if available
 - launches the app unless `-NoRun` is passed
