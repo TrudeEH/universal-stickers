@@ -1,8 +1,15 @@
 # Universal Stickers
 
-Small sticker/GIF picker built with a Rust storage core and a Qt Widgets desktop UI.
+Small sticker/GIF picker built with QT and Rust.
 
-The app stores imported images and GIFs in its own library, shows them in a searchable grid, lets you rename or delete them, supports drag-and-drop import, and copies the selected sticker to the clipboard for use in other apps. It also supports export/import backups.
+## Features
+
+- Store imported images and GIFs in its own library
+- Search stickers in a searchable grid
+- Rename or delete stickers
+- Drag-and-drop import support
+- Copy selected sticker to clipboard for use in other apps
+- Export/import backups
 
 ## Project Layout
 
@@ -19,7 +26,6 @@ Install a current Rust toolchain with `cargo` and `rustup`.
 
 This repo uses:
 
-- Rust edition `2024`
 - `cargo`
 - `rustup`
 
@@ -130,10 +136,3 @@ After a manual build, the desktop executable is:
 
 - Windows: `desktop/build/universal-stickers.exe`
 - Linux: `desktop/build/universal-stickers`
-
-## Notes
-
-- The app is now a normal desktop app. It does not use a tray icon or background process.
-- On Windows, the current local build uses Qt MinGW, so the Rust GNU target is required.
-- On KDE/Linux, the global hotkey is only enabled when `KF6GlobalAccel` is available at build time.
-- The build may emit MinGW `.drectve` linker warnings on Windows; the app still links and runs successfully in the current setup.
