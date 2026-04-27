@@ -98,6 +98,17 @@ add_executable(universal-stickers
 add_dependencies(universal-stickers rust_ffi)
 set_target_properties(universal-stickers PROPERTIES WIN32_EXECUTABLE TRUE)
 
+if(APPLE)
+    set_target_properties(universal-stickers PROPERTIES
+        MACOSX_BUNDLE TRUE
+        MACOSX_BUNDLE_BUNDLE_NAME "Universal Stickers"
+        MACOSX_BUNDLE_GUI_IDENTIFIER "${UNIVERSAL_STICKERS_APP_ID}"
+        MACOSX_BUNDLE_SHORT_VERSION_STRING "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_BUNDLE_VERSION "${PROJECT_VERSION}"
+        MACOSX_BUNDLE_COPYRIGHT "Copyright Universal Stickers Maintainers"
+    )
+endif()
+
 target_include_directories(universal-stickers PRIVATE
     src
     ${RUST_CXXBRIDGE_DIR}
@@ -128,6 +139,7 @@ elseif(UNIX AND NOT APPLE)
 endif()
 
 install(TARGETS universal-stickers
+    BUNDLE DESTINATION .
     RUNTIME DESTINATION ${CMAKE_INSTALL_BINDIR}
 )
 

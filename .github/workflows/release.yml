@@ -120,6 +120,8 @@ jobs:
         run: |
           mkdir -p dist
           cpack --config desktop/build/CPackConfig.cmake -C Release -G ZIP -B dist
+          macdeployqt "desktop/build/universal-stickers.app"
+          ditto -c -k --sequesterRsrc --keepParent "desktop/build/universal-stickers.app" "dist/universal-stickers-macos-app.zip"
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
