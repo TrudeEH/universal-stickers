@@ -25,6 +25,9 @@ jobs:
           - os: ubuntu-24.04
             label: Linux
             artifact_name: universal-stickers-linux
+          - os: macos-latest
+            label: macOS
+            artifact_name: universal-stickers-macos
 
     steps:
       - name: Checkout
@@ -43,6 +46,15 @@ jobs:
         with:
           version: "6.8.3"
           arch: win64_msvc2022_64
+          archives: "qtbase qtsvg"
+          cache: true
+          install-deps: false
+
+      - name: Install Qt for macOS
+        if: runner.os == 'macOS'
+        uses: jurplel/install-qt-action@v4
+        with:
+          version: "6.8.3"
           archives: "qtbase qtsvg"
           cache: true
           install-deps: false
@@ -72,6 +84,10 @@ jobs:
         if: runner.os == 'Linux'
         run: cmake -S desktop -B desktop/build -G Ninja -DCMAKE_BUILD_TYPE=Release
 
+      - name: Configure macOS build
+        if: runner.os == 'macOS'
+        run: cmake -S desktop -B desktop/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+
       - name: Build desktop app
         run: cmake --build desktop/build --config Release
 
@@ -98,6 +114,12 @@ jobs:
           mkdir -p dist
           cpack --config desktop/build/CPackConfig.cmake -C Release -G DEB -B dist
           cpack --config desktop/build/CPackConfig.cmake -C Release -G RPM -B dist
+
+      - name: Package macOS artifacts
+        if: runner.os == 'macOS'
+        run: |
+          mkdir -p dist
+          cpack --config desktop/build/CPackConfig.cmake -C Release -G ZIP -B dist
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4

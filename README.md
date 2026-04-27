@@ -17,6 +17,7 @@ Small sticker/GIF picker built with QT and Rust.
 - `ffi/`: `cxx` bridge crate that exposes the Rust core to the desktop app.
 - `desktop/`: Qt Widgets desktop app.
 - `run.ps1`: Windows helper script that configures, builds, deploys Qt runtime files, and runs the app.
+- `run.sh`: Linux helper script that configures, builds, and runs the app.
 
 ## Dependencies
 
@@ -141,6 +142,28 @@ What `run.ps1` does:
 - builds the Qt app
 - runs `windeployqt` if available
 - launches the app unless `-NoRun` is passed
+
+## Linux Helper Script
+
+On Linux, from a clean checkout:
+
+```bash
+./run.sh
+```
+
+Build without launching:
+
+```bash
+./run.sh --no-run
+```
+
+What `run.sh` does:
+
+- checks for `cargo` and `cmake`
+- configures the desktop build with CMake
+- uses Ninja for new build directories when it is installed
+- builds the Qt app
+- launches the app unless `--no-run` is passed
 
 ## Run
 
