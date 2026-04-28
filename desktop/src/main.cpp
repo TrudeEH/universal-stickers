@@ -46,6 +46,7 @@ int main(int argc, char* argv[])
         auto library = universal_stickers::init_library(rustStringFromQString(dataDir));
 
         MainWindow window(std::move(library));
+        window.setWindowIcon(QApplication::windowIcon());
         window.show();
         return app.exec();
     } catch (const std::exception& error) {
