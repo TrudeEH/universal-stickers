@@ -21,8 +21,7 @@ for arg in "$@"; do
 done
 
 repo_root="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
-build_dir="$repo_root/desktop/build"
-app_path="$build_dir/universal-stickers"
+app_path="$repo_root/target/debug/universal-stickers"
 
 require_command() {
     if ! command -v "$1" >/dev/null 2>&1; then
@@ -33,25 +32,14 @@ require_command() {
         fi
 
         echo "On Ubuntu/Debian, install the common build dependencies with:" >&2
-        echo "  sudo apt-get install cmake ninja-build qt6-base-dev qt6-svg-dev" >&2
+        echo "  sudo apt-get install build-essential libadwaita-1-dev libgtk-4-dev pkg-config" >&2
         exit 1
     fi
 }
 
 require_command cargo
-require_command cmake
 
-cmake_args=(
-    -S "$repo_root/desktop"
-    -B "$build_dir"
-)
-
-if [[ ! -f "$build_dir/CMakeCache.txt" ]] && command -v ninja >/dev/null 2>&1; then
-    cmake_args+=(-G Ninja)
-fi
-
-cmake "${cmake_args[@]}"
-cmake --build "$build_dir"
+cargo build -p universal-stickers
 
 if [[ "$no_run" -eq 0 ]]; then
     "$app_path"

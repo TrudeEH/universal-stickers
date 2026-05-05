@@ -1,90 +1,101 @@
 # Universal Stickers
 
-Small sticker/GIF picker built with QT and Rust.
+Small sticker/GIF picker built with GTK, libadwaita, and Rust.
 
 ## Features
 
 - Store imported images and GIFs in its own library
-- Search stickers in a searchable grid
+- Search stickers in a searchable responsive grid
 - Rename or delete stickers
 - Drag-and-drop import support
-- Copy selected sticker to clipboard for use in other apps
+- Copy selected sticker paths to the clipboard for use in other apps
 - Export/import backups
+- GNOME global shortcut support through the desktop portal when available
 
 ## Project Layout
 
 - `core/`: Rust storage library for import, search, rename, delete, thumbnail generation, and backups.
-- `ffi/`: `cxx` bridge crate that exposes the Rust core to the desktop app.
-- `desktop/`: Qt Widgets desktop app.
-- `run.ps1`: Windows helper script that configures, builds, deploys Qt runtime files, and runs the app.
-- `run.sh`: Linux helper script that configures, builds, and runs the app.
+- `app/`: GTK4/libadwaita desktop app.
+- `desktop/packaging/`: Linux desktop metadata, Flatpak manifest, and Arch/AUR recipe.
+- `run.sh`: Linux helper script that builds and runs the app.
+- `run.ps1`: Windows helper script that builds and runs the Rust app when GTK runtime dependencies are available.
 
 ## Dependencies
 
-## Rust
-
 Install a current Rust toolchain with `cargo` and `rustup`.
 
-This repo uses:
+The GTK desktop app needs:
 
-- `cargo`
-- `rustup`
+- GTK 4 development files
+- libadwaita development files
+- pkg-config
+- Optional: `xdg-desktop-portal-gnome` for the Ctrl+Meta+Space global shortcut on GNOME
 
-On Windows with the MinGW Qt build used by this repo, also install the GNU Rust target:
-
-```powershell
-rustup target add x86_64-pc-windows-gnu
-```
-
-## Desktop Build Dependencies
-
-The desktop app needs:
-
-- CMake 3.21+
-- Ninja
-- Qt 6 with at least:
-  - `Core`
-  - `Gui`
-  - `Widgets`
-- Optional:
-  - `DBus`
-  - `KF6GlobalAccel` for KDE global hotkey support on Linux
-
-The Rust core uses bundled SQLite through `rusqlite`, so you do not need to install SQLite separately.
-
-## Windows Setup
-
-For the helper script path, install:
-
-- Rust with `cargo` and `rustup`
-- Python 3 with `pip`
-
-On first run, `run.ps1` bootstraps a repo-local Qt toolchain under `.tools/qt` and installs:
-
-- CMake under `.tools/qt/Tools/CMake_64`
-- MinGW under `.tools/qt/Tools/mingw1310_64`
-- Qt 6.8.3 under `.tools/qt/6.8.3/mingw_64`
-
-If the GNU Rust target is missing, the script also runs:
-
-```powershell
-rustup target add x86_64-pc-windows-gnu
-```
-
-If you already have your own Qt installation elsewhere, you can still build manually by pointing CMake at your Qt prefix instead of using `run.ps1`.
+The Rust core uses bundled SQLite through `rusqlite`, so SQLite development files are not required.
 
 ## Linux Setup
 
-Install:
+Ubuntu/Debian:
 
-- Rust toolchain
-- CMake
-- Ninja
-- Qt 6 development packages for `Core`, `Gui`, and `Widgets`
-- Optional Qt DBus development package
-- Optional KDE `KF6GlobalAccel` development package if you want KDE global hotkey support
+```bash
+sudo apt-get install build-essential libgtk-4-dev libadwaita-1-dev pkg-config xdg-desktop-portal-gnome
+```
 
-Exact package names depend on your distro.
+Arch:
+
+```bash
+sudo pacman -S --needed rust gtk4 libadwaita pkgconf xdg-desktop-portal-gnome
+```
+
+Fedora:
+
+```bash
+sudo dnf install rust cargo gtk4-devel libadwaita-devel pkgconf-pkg-config xdg-desktop-portal-gnome
+```
+
+## Build And Run
+
+From the repository root:
+
+```bash
+cargo run -p universal-stickers
+```
+
+Or use the helper script:
+
+```bash
+./run.sh
+```
+
+Build without launching:
+
+```bash
+./run.sh --no-run
+```
+
+The desktop executable is:
+
+- Linux: `target/debug/universal-stickers`
+- Windows: `target\debug\universal-stickers.exe`
+
+## Tests
+
+```bash
+cargo test -p universal-stickers-core
+cargo check -p universal-stickers
+```
+
+## Linux Install Staging
+
+After a release build:
+
+```bash
+cargo build --release -p universal-stickers
+DESTDIR="$PWD/pkgroot" PREFIX=/usr ./scripts/install-linux.sh
+```
+
+This stages the binary, desktop file, metainfo, icon, README, and license under
+`pkgroot`.
 
 ## Arch / AUR Packaging
 
@@ -102,88 +113,14 @@ The release workflow also builds a `.pkg.tar.zst` artifact from this recipe.
 For AUR publishing, upload `PKGBUILD` and a regenerated `.SRCINFO` to
 `ssh://aur@aur.archlinux.org/universal-stickers-git.git`.
 
-## Build
+## Data Compatibility
 
-## Rust Core Tests
+The GTK rewrite intentionally keeps the existing local data location and storage
+format. Existing Linux libraries under:
 
-```powershell
-cargo test -p universal-stickers-core
+```text
+~/.local/share/UniversalStickers/Universal Stickers
 ```
 
-## Build The Desktop App Manually
-
-From the repository root:
-
-```powershell
-cmake -S desktop -B desktop/build
-cmake --build desktop/build
-```
-
-If Qt is not in a default location, pass `CMAKE_PREFIX_PATH`:
-
-```powershell
-cmake -S desktop -B desktop/build -DCMAKE_PREFIX_PATH="C:\path\to\Qt\6.x.x\mingw_64"
-cmake --build desktop/build
-```
-
-On Linux the same flow applies, using your Qt install prefix:
-
-```bash
-cmake -S desktop -B desktop/build -DCMAKE_PREFIX_PATH=/path/to/qt
-cmake --build desktop/build
-```
-
-The desktop build automatically invokes Cargo for `universal-stickers-ffi` and links the generated Rust static library into the Qt executable.
-
-## Windows Helper Script
-
-On Windows, from a clean checkout:
-
-```powershell
-.\run.ps1
-```
-
-Build without launching:
-
-```powershell
-.\run.ps1 -NoRun
-```
-
-What `run.ps1` does:
-
-- bootstraps the repo-local Qt/CMake/MinGW toolchain under `.tools/qt` when it is missing
-- ensures the Rust target `x86_64-pc-windows-gnu` is installed
-- configures the desktop build with CMake
-- falls back to `MinGW Makefiles` if `ninja.exe` is not available
-- builds the Qt app
-- runs `windeployqt` if available
-- launches the app unless `-NoRun` is passed
-
-## Linux Helper Script
-
-On Linux, from a clean checkout:
-
-```bash
-./run.sh
-```
-
-Build without launching:
-
-```bash
-./run.sh --no-run
-```
-
-What `run.sh` does:
-
-- checks for `cargo` and `cmake`
-- configures the desktop build with CMake
-- uses Ninja for new build directories when it is installed
-- builds the Qt app
-- launches the app unless `--no-run` is passed
-
-## Run
-
-After a manual build, the desktop executable is:
-
-- Windows: `desktop/build/universal-stickers.exe`
-- Linux: `desktop/build/universal-stickers`
+continue to use the same `stickers.db`, `assets/`, `thumbs/`, and backup
+manifest format.

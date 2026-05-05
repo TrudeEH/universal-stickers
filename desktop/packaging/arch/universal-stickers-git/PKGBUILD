@@ -3,25 +3,22 @@
 pkgname=universal-stickers-git
 pkgver=0.1.0.r14.g776d014
 pkgrel=1
-pkgdesc="Small sticker and GIF picker built with Qt and Rust"
+pkgdesc="Small sticker and GIF picker built with GTK and Rust"
 arch=('x86_64')
 url="https://github.com/TrudeEH/universal-stickers"
 license=('MIT')
 depends=(
   'gcc-libs'
   'glibc'
-  'kglobalaccel'
-  'qt6-base'
-  'qt6-svg'
+  'gtk4'
+  'libadwaita'
 )
 makedepends=(
   'cargo'
-  'cmake'
   'git'
-  'ninja'
 )
 optdepends=(
-  'kglobalacceld: KDE global shortcut daemon for the Ctrl+Meta+Space picker hotkey'
+  'xdg-desktop-portal-gnome: GNOME global shortcut portal for Ctrl+Meta+Space'
 )
 provides=('universal-stickers')
 conflicts=('universal-stickers')
@@ -52,15 +49,11 @@ build() {
   export RUSTUP_TOOLCHAIN=stable
   export CARGO_TARGET_DIR="$srcdir/cargo-target"
 
-  cmake -S desktop -B build -G Ninja \
-    -DCMAKE_BUILD_TYPE=Release \
-    -DCMAKE_INSTALL_PREFIX=/usr \
-    -DCMAKE_INSTALL_LIBDIR=lib
-  cmake --build build
+  cargo build --release --locked -p universal-stickers
 }
 
 package() {
   cd "$pkgname"
 
-  DESTDIR="$pkgdir" cmake --install build
+  DESTDIR="$pkgdir" PREFIX=/usr ./scripts/install-linux.sh
 }

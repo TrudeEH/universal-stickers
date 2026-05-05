@@ -12,22 +12,9 @@ concurrency:
   cancel-in-progress: true
 
 jobs:
-  build:
-    name: Build ${{ matrix.label }}
-    runs-on: ${{ matrix.os }}
-    strategy:
-      fail-fast: false
-      matrix:
-        include:
-          - os: windows-latest
-            label: Windows
-            artifact_name: universal-stickers-windows
-          - os: ubuntu-24.04
-            label: Linux
-            artifact_name: universal-stickers-linux
-          - os: macos-latest
-            label: macOS
-            artifact_name: universal-stickers-macos
+  linux:
+    name: Build Linux packages
+    runs-on: ubuntu-24.04
 
     steps:
       - name: Checkout
@@ -36,100 +23,77 @@ jobs:
       - name: Install Rust
         uses: dtolnay/rust-toolchain@stable
 
-      - name: Set up MSVC environment
-        if: runner.os == 'Windows'
-        uses: ilammy/msvc-dev-cmd@v1
-
-      - name: Install Qt for Windows
-        if: runner.os == 'Windows'
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.8.3"
-          arch: win64_msvc2022_64
-          archives: "qtbase qtsvg"
-          cache: true
-          install-deps: false
-
-      - name: Install Qt for macOS
-        if: runner.os == 'macOS'
-        uses: jurplel/install-qt-action@v4
-        with:
-          version: "6.8.3"
-          archives: "qtbase qtsvg"
-          cache: true
-          install-deps: false
-
       - name: Install Linux build dependencies
-        if: runner.os == 'Linux'
         run: |
           sudo apt-get update
-          sudo apt-get install -y cmake ninja-build qt6-base-dev qt6-svg-dev dpkg-dev rpm
+          sudo apt-get install -y build-essential dpkg-dev libadwaita-1-dev libgtk-4-dev pkg-config rpm
 
-      - name: Install Inkscape on Windows
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: choco install inkscape --yes --no-progress
-
-      - name: Render Windows icon assets
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: .\scripts\render-icons.ps1 -SvgPath .\icon.svg -OutputDir .\desktop\resources\icons
-
-      - name: Configure Windows build
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: cmake -S desktop -B desktop/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$env:QT_ROOT_DIR"
-
-      - name: Configure Linux build
-        if: runner.os == 'Linux'
-        run: cmake -S desktop -B desktop/build -G Ninja -DCMAKE_BUILD_TYPE=Release
-
-      - name: Configure macOS build
-        if: runner.os == 'macOS'
-        run: cmake -S desktop -B desktop/build -G Ninja -DCMAKE_BUILD_TYPE=Release -DCMAKE_PREFIX_PATH="$QT_ROOT_DIR"
+      - name: Test Rust core
+        run: cargo test -p universal-stickers-core
 
       - name: Build desktop app
-        run: cmake --build desktop/build --config Release
-
-      - name: Install WiX toolset
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          dotnet tool install --global wix --version 4.0.4
-          $env:PATH = "$env:USERPROFILE\\.dotnet\\tools;$env:PATH"
-          wix extension add --global WixToolset.UI.wixext/4.0.4
-
-      - name: Package Windows artifacts
-        if: runner.os == 'Windows'
-        shell: pwsh
-        run: |
-          New-Item -ItemType Directory -Force -Path dist | Out-Null
-          $env:PATH = "$env:USERPROFILE\\.dotnet\\tools;$env:PATH"
-          cpack --config desktop/build/CPackConfig.cmake -C Release -G ZIP -B dist
-          cpack --config desktop/build/CPackConfig.cmake -C Release -G WIX -B dist
+        run: cargo build --release --locked -p universal-stickers
 
       - name: Package Linux artifacts
-        if: runner.os == 'Linux'
         run: |
+          version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
           mkdir -p dist
-          cpack --config desktop/build/CPackConfig.cmake -C Release -G DEB -B dist
-          cpack --config desktop/build/CPackConfig.cmake -C Release -G RPM -B dist
+          rm -rf pkgroot
+          DESTDIR="$PWD/pkgroot" PREFIX=/usr ./scripts/install-linux.sh
 
-      - name: Package macOS artifacts
-        if: runner.os == 'macOS'
-        run: |
-          mkdir -p dist
-          cpack --config desktop/build/CPackConfig.cmake -C Release -G ZIP -B dist
-          macdeployqt "desktop/build/universal-stickers.app"
-          ditto -c -k --sequesterRsrc --keepParent "desktop/build/universal-stickers.app" "dist/universal-stickers-macos-app.zip"
+          mkdir -p pkgroot/DEBIAN
+          cat > pkgroot/DEBIAN/control <<CONTROL
+          Package: universal-stickers
+          Version: ${version}
+          Section: utils
+          Priority: optional
+          Architecture: amd64
+          Maintainer: Universal Stickers Maintainers
+          Depends: libadwaita-1-0, libgtk-4-1, xdg-desktop-portal
+          Description: Small sticker and GIF picker built with GTK and Rust.
+          CONTROL
+          dpkg-deb --build pkgroot "dist/universal-stickers_${version}_amd64.deb"
+
+          mkdir -p rpm/BUILD rpm/RPMS rpm/SOURCES rpm/SPECS rpm/SRPMS
+          tar -C pkgroot --owner=0 --group=0 -czf "rpm/SOURCES/universal-stickers-root.tar.gz" .
+          cat > rpm/SPECS/universal-stickers.spec <<SPEC
+          Name: universal-stickers
+          Version: ${version}
+          Release: 1%{?dist}
+          Summary: Small sticker and GIF picker built with GTK and Rust
+          License: MIT
+          URL: https://github.com/TrudeEH/universal-stickers
+          Requires: gtk4
+          Requires: libadwaita
+          Requires: xdg-desktop-portal
+          Source0: universal-stickers-root.tar.gz
+
+          %description
+          Small sticker and GIF picker built with GTK and Rust.
+
+          %prep
+          %setup -q -c -T
+
+          %install
+          mkdir -p %{buildroot}
+          tar -xzf %{SOURCE0} -C %{buildroot}
+
+          %files
+          /usr/bin/universal-stickers
+          /usr/share/applications/dev.trude.UniversalStickers.desktop
+          /usr/share/metainfo/dev.trude.UniversalStickers.metainfo.xml
+          /usr/share/icons/hicolor/scalable/apps/dev.trude.UniversalStickers.svg
+          /usr/share/doc/universal-stickers/README.md
+          /usr/share/doc/universal-stickers/LICENSE.txt
+          SPEC
+          rpmbuild --define "_topdir $PWD/rpm" -bb rpm/SPECS/universal-stickers.spec
+          cp rpm/RPMS/*/*.rpm dist/
 
       - name: Upload packaged artifact
         uses: actions/upload-artifact@v4
         with:
-          name: ${{ matrix.artifact_name }}
+          name: universal-stickers-linux
           path: |
-            dist/*.zip
-            dist/*.msi
             dist/*.deb
             dist/*.rpm
           if-no-files-found: error
@@ -174,7 +138,7 @@ jobs:
 
       - name: Install Arch build dependencies
         run: |
-          pacman -Syu --noconfirm --needed cargo cmake git kglobalaccel ninja qt6-base qt6-svg
+          pacman -Syu --noconfirm --needed cargo git gtk4 libadwaita xdg-desktop-portal-gnome
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
@@ -194,7 +158,7 @@ jobs:
   release:
     name: Publish release
     needs:
-      - build
+      - linux
       - flatpak
       - arch
     runs-on: ubuntu-latest
@@ -216,8 +180,6 @@ jobs:
           overwrite_files: true
           fail_on_unmatched_files: true
           files: |
-            release-assets/**/*.zip
-            release-assets/**/*.msi
             release-assets/**/*.deb
             release-assets/**/*.rpm
             release-assets/**/*.flatpak

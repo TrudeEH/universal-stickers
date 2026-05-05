@@ -1,8 +1,8 @@
 # Universal Stickers AUR Package
 
 This directory contains the files for the `universal-stickers-git` AUR package.
-It builds the app from the upstream Git repository with the same CMake install
-rules used by the Debian and Fedora packages.
+It builds the app from the upstream Git repository with Cargo and installs the
+same desktop metadata used by the Debian and Fedora packages.
 
 ## Test Locally On Arch
 
