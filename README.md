@@ -86,6 +86,22 @@ Install:
 
 Exact package names depend on your distro.
 
+## Arch / AUR Packaging
+
+The Arch package recipe lives in
+`desktop/packaging/arch/universal-stickers-git`.
+
+From an Arch system:
+
+```bash
+cd desktop/packaging/arch/universal-stickers-git
+makepkg -si
+```
+
+The release workflow also builds a `.pkg.tar.zst` artifact from this recipe.
+For AUR publishing, upload `PKGBUILD` and a regenerated `.SRCINFO` to
+`ssh://aur@aur.archlinux.org/universal-stickers-git.git`.
+
 ## Build
 
 ## Rust Core Tests

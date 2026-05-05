@@ -1,0 +1,25 @@
+if(NOT DEFINED RUST_PROFILE_DIR)
+    message(FATAL_ERROR "RUST_PROFILE_DIR is required")
+endif()
+
+if(NOT DEFINED RUST_NATIVE_LIB_DIR)
+    message(FATAL_ERROR "RUST_NATIVE_LIB_DIR is required")
+endif()
+
+file(MAKE_DIRECTORY "${RUST_NATIVE_LIB_DIR}")
+
+file(GLOB CXXBRIDGE_LIBS "${RUST_PROFILE_DIR}/build/cxx-*/out/libcxxbridge1.a")
+list(LENGTH CXXBRIDGE_LIBS CXXBRIDGE_LIB_COUNT)
+if(NOT CXXBRIDGE_LIB_COUNT EQUAL 1)
+    message(FATAL_ERROR "Expected one cxxbridge1 static library, found ${CXXBRIDGE_LIB_COUNT}")
+endif()
+list(GET CXXBRIDGE_LIBS 0 CXXBRIDGE_LIB)
+file(COPY_FILE "${CXXBRIDGE_LIB}" "${RUST_NATIVE_LIB_DIR}/libcxxbridge1.a" ONLY_IF_DIFFERENT)
+
+file(GLOB SQLITE_LIBS "${RUST_PROFILE_DIR}/build/libsqlite3-sys-*/out/libsqlite3.a")
+list(LENGTH SQLITE_LIBS SQLITE_LIB_COUNT)
+if(NOT SQLITE_LIB_COUNT EQUAL 1)
+    message(FATAL_ERROR "Expected one bundled SQLite static library, found ${SQLITE_LIB_COUNT}")
+endif()
+list(GET SQLITE_LIBS 0 SQLITE_LIB)
+file(COPY_FILE "${SQLITE_LIB}" "${RUST_NATIVE_LIB_DIR}/libsqlite3.a" ONLY_IF_DIFFERENT)

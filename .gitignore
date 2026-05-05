@@ -3,6 +3,7 @@
 /.vscode/
 /.vs/
 /desktop/build/
+/desktop/build-*/
 *.user
 *.db-shm
 *.db-wal

@@ -1,0 +1,23 @@
+pkgbase = universal-stickers-git
+	pkgdesc = Small sticker and GIF picker built with Qt and Rust
+	pkgver = 0.1.0.r14.g776d014
+	pkgrel = 1
+	url = https://github.com/TrudeEH/universal-stickers
+	arch = x86_64
+	license = MIT
+	makedepends = cargo
+	makedepends = cmake
+	makedepends = git
+	makedepends = ninja
+	depends = gcc-libs
+	depends = glibc
+	depends = kglobalaccel
+	depends = qt6-base
+	depends = qt6-svg
+	optdepends = kglobalacceld: KDE global shortcut daemon for the Ctrl+Meta+Space picker hotkey
+	provides = universal-stickers
+	conflicts = universal-stickers
+	source = universal-stickers-git::git+https://github.com/TrudeEH/universal-stickers.git
+	b2sums = SKIP
+
+pkgname = universal-stickers-git

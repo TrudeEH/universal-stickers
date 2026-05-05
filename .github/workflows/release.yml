@@ -159,11 +159,44 @@ jobs:
           path: universal-stickers-linux.flatpak
           if-no-files-found: error
 
+  arch:
+    name: Build Arch package
+    runs-on: ubuntu-latest
+    container:
+      image: archlinux:base-devel
+
+    steps:
+      - name: Install git for checkout
+        run: pacman -Sy --noconfirm --needed git
+
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Arch build dependencies
+        run: |
+          pacman -Syu --noconfirm --needed cargo cmake git kglobalaccel ninja qt6-base qt6-svg
+          useradd -m builder
+          chown -R builder:builder "$GITHUB_WORKSPACE"
+
+      - name: Build Arch package
+        run: |
+          su builder -c "cd '$GITHUB_WORKSPACE/desktop/packaging/arch/universal-stickers-git' && makepkg --noconfirm --cleanbuild --clean --needed"
+          mkdir -p dist
+          cp desktop/packaging/arch/universal-stickers-git/*.pkg.tar.zst dist/
+
+      - name: Upload Arch artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-stickers-arch
+          path: dist/*.pkg.tar.zst
+          if-no-files-found: error
+
   release:
     name: Publish release
     needs:
       - build
       - flatpak
+      - arch
     runs-on: ubuntu-latest
 
     steps:
@@ -188,5 +221,6 @@ jobs:
             release-assets/**/*.deb
             release-assets/**/*.rpm
             release-assets/**/*.flatpak
+            release-assets/**/*.pkg.tar.zst
           body: |
             Automated build artifacts for commit `${{ github.sha }}` on `${{ github.ref_name }}`.

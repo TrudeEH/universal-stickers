@@ -25,6 +25,9 @@ set(CARGO_TARGET_DIR ${CMAKE_CURRENT_BINARY_DIR}/cargo-target)
 set(RUST_CARGO_BUILD_ARGS)
 set(RUST_CARGO_PROFILE debug)
 set(RUST_CXXBRIDGE_DIR ${CARGO_TARGET_DIR}/cxxbridge)
+set(RUST_NATIVE_STATIC_LIBS)
+set(RUST_NATIVE_LIB_OUTPUTS)
+set(RUST_NATIVE_LIB_COLLECT_COMMAND)
 set(UNIVERSAL_STICKERS_APP_ID "dev.trude.UniversalStickers")
 set(UNIVERSAL_STICKERS_ICON_SVG "${CMAKE_CURRENT_SOURCE_DIR}/../icon.svg")
 set(UNIVERSAL_STICKERS_WINDOWS_ICON "${CMAKE_CURRENT_SOURCE_DIR}/resources/icons/universal-stickers.ico")
@@ -54,11 +57,30 @@ elseif(WIN32)
 else()
     set(RUST_STATIC_LIB ${CARGO_TARGET_DIR}/${RUST_CARGO_PROFILE}/libuniversal_stickers_ffi.a)
 endif()
+
+if(UNIX AND NOT APPLE)
+    set(RUST_NATIVE_LIB_DIR ${CARGO_TARGET_DIR}/native-libs)
+    set(RUST_CXXBRIDGE_STATIC_LIB ${RUST_NATIVE_LIB_DIR}/libcxxbridge1.a)
+    set(RUST_SQLITE_STATIC_LIB ${RUST_NATIVE_LIB_DIR}/libsqlite3.a)
+    list(APPEND RUST_NATIVE_STATIC_LIBS
+        ${RUST_CXXBRIDGE_STATIC_LIB}
+        ${RUST_SQLITE_STATIC_LIB}
+    )
+    list(APPEND RUST_NATIVE_LIB_OUTPUTS ${RUST_NATIVE_STATIC_LIBS})
+    set(RUST_NATIVE_LIB_COLLECT_COMMAND
+        COMMAND ${CMAKE_COMMAND}
+            -DRUST_PROFILE_DIR=${CARGO_TARGET_DIR}/${RUST_CARGO_PROFILE}
+            -DRUST_NATIVE_LIB_DIR=${RUST_NATIVE_LIB_DIR}
+            -P ${CMAKE_CURRENT_SOURCE_DIR}/cmake/CollectRustNativeLibs.cmake
+    )
+endif()
 set(RUST_BRIDGE_CC ${RUST_CXXBRIDGE_DIR}/universal-stickers-ffi/src/lib.rs.cc)
 set_source_files_properties(${RUST_BRIDGE_CC} PROPERTIES GENERATED TRUE SKIP_AUTOGEN TRUE SKIP_AUTOMOC TRUE)
 
 add_custom_command(
-    OUTPUT ${RUST_STATIC_LIB}
+    OUTPUT
+        ${RUST_STATIC_LIB}
+        ${RUST_NATIVE_LIB_OUTPUTS}
     BYPRODUCTS ${RUST_BRIDGE_CC}
     DEPENDS
         ${CMAKE_CURRENT_SOURCE_DIR}/../Cargo.toml
@@ -72,6 +94,7 @@ add_custom_command(
         CARGO_TARGET_DIR=${CARGO_TARGET_DIR}
         CXX_x86_64_pc_windows_gnu=${CMAKE_CXX_COMPILER}
         ${CARGO_EXECUTABLE} build -p universal-stickers-ffi ${RUST_CARGO_BUILD_ARGS}
+    ${RUST_NATIVE_LIB_COLLECT_COMMAND}
     WORKING_DIRECTORY ${CMAKE_CURRENT_SOURCE_DIR}/..
     COMMENT "Building Rust FFI library"
     VERBATIM
@@ -121,6 +144,7 @@ target_link_libraries(universal-stickers PRIVATE
     Qt6::Svg
     Qt6::Widgets
     ${RUST_STATIC_LIB}
+    ${RUST_NATIVE_STATIC_LIBS}
 )
 
 if(TARGET Qt6::DBus)
