@@ -7,6 +7,7 @@ use std::{
 };
 
 use anyhow::{Context, Result, anyhow};
+#[cfg(target_os = "linux")]
 use futures_util::StreamExt;
 use gtk::{
     Align, Box as GtkBox, Button, CssProvider, DrawingArea, DropTarget, Entry,
@@ -20,6 +21,7 @@ use universal_stickers_core::{ImportRequest, StickerRecord, StickerStore};
 const APP_ID: &str = "dev.trude.UniversalStickers";
 const LEGACY_ORG_DIR: &str = "UniversalStickers";
 const LEGACY_APP_DIR: &str = "Universal Stickers";
+#[cfg(target_os = "linux")]
 const SHORTCUT_ID: &str = "toggle-picker";
 const DEFAULT_DISPLAY_SCALE: u32 = 100;
 const MIN_DISPLAY_SCALE: u32 = 50;
@@ -1043,6 +1045,7 @@ fn show_startup_error(app: &adw::Application, error: &anyhow::Error) {
     window.present();
 }
 
+#[cfg(target_os = "linux")]
 fn setup_global_shortcut(state: Weak<AppState>) {
     glib::MainContext::default().spawn_local(async move {
         let Some(initial_state) = state.upgrade() else {
@@ -1070,6 +1073,10 @@ fn setup_global_shortcut(state: Weak<AppState>) {
     });
 }
 
+#[cfg(not(target_os = "linux"))]
+fn setup_global_shortcut(_state: Weak<AppState>) {}
+
+#[cfg(target_os = "linux")]
 async fn bind_global_shortcut()
 -> Result<impl futures_util::Stream<Item = ashpd::desktop::global_shortcuts::Activated>> {
     use ashpd::desktop::{

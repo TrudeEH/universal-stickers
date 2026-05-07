@@ -138,7 +138,7 @@ jobs:
 
       - name: Install Arch build dependencies
         run: |
-          pacman -Syu --noconfirm --needed cargo git gtk4 libadwaita xdg-desktop-portal-gnome
+          pacman -Syu --noconfirm --needed cargo git gtk4 libadwaita sqlite xdg-desktop-portal-gnome
           useradd -m builder
           chown -R builder:builder "$GITHUB_WORKSPACE"
 
@@ -155,12 +155,88 @@ jobs:
           path: dist/*.pkg.tar.zst
           if-no-files-found: error
 
+  windows:
+    name: Build Windows app
+    runs-on: windows-latest
+
+    defaults:
+      run:
+        shell: msys2 {0}
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Setup MSYS2
+        uses: msys2/setup-msys2@v2
+        with:
+          msystem: MINGW64
+          update: true
+          install: >-
+            mingw-w64-x86_64-rust
+            mingw-w64-x86_64-pkgconf
+            mingw-w64-x86_64-gtk4
+            mingw-w64-x86_64-libadwaita
+            mingw-w64-x86_64-sqlite3
+            zip
+
+      - name: Build desktop app
+        run: cargo build --release --locked -p universal-stickers
+
+      - name: Package Windows artifact
+        run: |
+          mkdir -p dist/universal-stickers-windows
+          cp target/release/universal-stickers.exe dist/universal-stickers-windows/
+          cp README.md LICENSE.txt dist/universal-stickers-windows/
+          cd dist
+          zip -r universal-stickers-windows.zip universal-stickers-windows
+
+      - name: Upload Windows artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-stickers-windows
+          path: dist/universal-stickers-windows.zip
+          if-no-files-found: error
+
+  macos:
+    name: Build macOS app
+    runs-on: macos-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Install Rust
+        uses: dtolnay/rust-toolchain@stable
+
+      - name: Install macOS build dependencies
+        run: brew install gtk4 libadwaita pkg-config
+
+      - name: Build desktop app
+        run: cargo build --release --locked -p universal-stickers
+
+      - name: Package macOS artifact
+        run: |
+          mkdir -p dist/universal-stickers-macos
+          cp target/release/universal-stickers dist/universal-stickers-macos/
+          cp README.md LICENSE.txt dist/universal-stickers-macos/
+          ditto -c -k --sequesterRsrc --keepParent dist/universal-stickers-macos dist/universal-stickers-macos.zip
+
+      - name: Upload macOS artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: universal-stickers-macos
+          path: dist/universal-stickers-macos.zip
+          if-no-files-found: error
+
   release:
     name: Publish release
     needs:
       - linux
       - flatpak
       - arch
+      - windows
+      - macos
     runs-on: ubuntu-latest
 
     steps:
@@ -184,5 +260,6 @@ jobs:
             release-assets/**/*.rpm
             release-assets/**/*.flatpak
             release-assets/**/*.pkg.tar.zst
+            release-assets/**/*.zip
           body: |
             Automated build artifacts for commit `${{ github.sha }}` on `${{ github.ref_name }}`.

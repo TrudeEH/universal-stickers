@@ -11,6 +11,7 @@ pkgbase = universal-stickers-git
 	depends = glibc
 	depends = gtk4
 	depends = libadwaita
+	depends = sqlite
 	optdepends = xdg-desktop-portal-gnome: GNOME global shortcut portal for Ctrl+Meta+Space
 	provides = universal-stickers
 	conflicts = universal-stickers
