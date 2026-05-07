@@ -128,41 +128,31 @@ impl StickerStore {
 
     pub fn get_item(&self, id: u64) -> Result<StickerRecord, StoreError> {
         let connection = self.connection()?;
-        let record = connection
-            .query_row(
-                "SELECT
-                    id,
-                    name,
-                    kind,
-                    original_filename,
-                    asset_path,
-                    thumb_path,
-                    mime_type,
-                    width,
-                    height,
-                    created_at,
-                    updated_at
-                 FROM stickers
-                 WHERE id = ?1",
-                [id as i64],
-                Self::row_to_record,
-            )
-            .optional()?;
-
-        record.ok_or(StoreError::NotFound)
+        Self::get_item_with_connection(&connection, id)
     }
 
     pub fn import_items(
         &self,
         requests: impl IntoIterator<Item = ImportRequest>,
     ) -> Result<Vec<StickerRecord>, StoreError> {
-        let connection = self.connection()?;
+        let mut connection = self.connection()?;
+        let transaction = connection.transaction()?;
         let mut imported = Vec::new();
 
         for request in requests {
-            imported.push(self.import_one(&connection, request)?);
+            match self.import_one(&transaction, request) {
+                Ok(record) => imported.push(record),
+                Err(error) => {
+                    for record in &imported {
+                        let _ = self.remove_if_exists(Path::new(&record.asset_path));
+                        let _ = self.remove_if_exists(Path::new(&record.thumb_path));
+                    }
+                    return Err(error);
+                }
+            }
         }
 
+        transaction.commit()?;
         Ok(imported)
     }
 
@@ -285,12 +275,17 @@ impl StickerStore {
 
         let format = image::ImageFormat::from_path(&source_path)
             .map_err(|_| StoreError::UnsupportedFormat(source_path.display().to_string()))?;
+        if !is_supported_format(format) {
+            return Err(StoreError::UnsupportedFormat(
+                source_path.display().to_string(),
+            ));
+        }
         let extension = extension_for_format(format);
         let mime_type = mime_guess::from_path(&source_path)
             .first_raw()
             .unwrap_or("application/octet-stream")
             .to_string();
-        let kind = if mime_type == "image/gif" {
+        let kind = if format == image::ImageFormat::Gif {
             "gif".to_string()
         } else {
             "static_image".to_string()
@@ -298,8 +293,17 @@ impl StickerStore {
 
         let generated_name = request
             .name
-            .filter(|value| !value.trim().is_empty())
+            .and_then(|value| {
+                let trimmed = value.trim().to_string();
+                (!trimmed.is_empty()).then_some(trimmed)
+            })
             .unwrap_or_else(|| file_stem_or_name(&source_path));
+
+        let image = ImageReader::open(&source_path)?
+            .with_guessed_format()?
+            .decode()?;
+        let (width, height) = image.dimensions();
+        let thumb = image.thumbnail(THUMB_SIZE, THUMB_SIZE);
 
         let asset_filename = format!("{}.{}", Uuid::new_v4(), extension);
         let thumb_filename = format!("{}.png", Uuid::new_v4());
@@ -307,12 +311,6 @@ impl StickerStore {
         let thumb_path = self.thumbs_dir.join(thumb_filename);
 
         fs::copy(&source_path, &asset_path)?;
-
-        let image = ImageReader::open(&asset_path)?
-            .with_guessed_format()?
-            .decode()?;
-        let (width, height) = image.dimensions();
-        let thumb = image.thumbnail(THUMB_SIZE, THUMB_SIZE);
         thumb.save(&thumb_path)?;
 
         let now = unix_now();
@@ -351,11 +349,39 @@ impl StickerStore {
         )?;
 
         let id = connection.last_insert_rowid() as u64;
-        self.get_item(id)
+        Self::get_item_with_connection(connection, id)
     }
 
     fn connection(&self) -> Result<Connection, StoreError> {
         Ok(Connection::open(&self.db_path)?)
+    }
+
+    fn get_item_with_connection(
+        connection: &Connection,
+        id: u64,
+    ) -> Result<StickerRecord, StoreError> {
+        let record = connection
+            .query_row(
+                "SELECT
+                    id,
+                    name,
+                    kind,
+                    original_filename,
+                    asset_path,
+                    thumb_path,
+                    mime_type,
+                    width,
+                    height,
+                    created_at,
+                    updated_at
+                 FROM stickers
+                 WHERE id = ?1",
+                [id as i64],
+                Self::row_to_record,
+            )
+            .optional()?;
+
+        record.ok_or(StoreError::NotFound)
     }
 
     fn migrate(&self, connection: &Connection) -> Result<(), StoreError> {
@@ -483,6 +509,17 @@ fn file_stem_or_name(path: &Path) -> String {
         .unwrap_or_else(|| "sticker".to_string())
 }
 
+fn is_supported_format(format: image::ImageFormat) -> bool {
+    matches!(
+        format,
+        image::ImageFormat::Gif
+            | image::ImageFormat::Jpeg
+            | image::ImageFormat::Png
+            | image::ImageFormat::Bmp
+            | image::ImageFormat::WebP
+    )
+}
+
 fn extension_for_format(format: image::ImageFormat) -> &'static str {
     match format {
         image::ImageFormat::Gif => "gif",
@@ -490,7 +527,7 @@ fn extension_for_format(format: image::ImageFormat) -> &'static str {
         image::ImageFormat::Png => "png",
         image::ImageFormat::Bmp => "bmp",
         image::ImageFormat::WebP => "webp",
-        _ => "img",
+        _ => unreachable!("unsupported image format should be rejected before extension lookup"),
     }
 }
 
@@ -673,6 +710,58 @@ mod tests {
         }]);
 
         assert!(matches!(result, Err(StoreError::UnsupportedFormat(_))));
+    }
+
+    #[test]
+    fn failed_import_rolls_back_batch_and_leaves_no_orphans() {
+        let (_temp_dir, store) = setup_store();
+        let source_dir = TempDir::new().expect("source dir");
+        let good_file = source_dir.path().join("good.png");
+        let bad_file = source_dir.path().join("bad.png");
+        write_png(&good_file, [9, 8, 7, 255]);
+        fs::write(&bad_file, "not really a png").expect("write invalid png");
+
+        let result = store.import_items([
+            ImportRequest {
+                path: good_file,
+                name: Some("Good".to_string()),
+                original_filename: None,
+            },
+            ImportRequest {
+                path: bad_file,
+                name: Some("Bad".to_string()),
+                original_filename: None,
+            },
+        ]);
+
+        assert!(matches!(result, Err(StoreError::Image(_))));
+        assert!(store.list_items("").expect("list").is_empty());
+        assert_eq!(
+            fs::read_dir(&store.assets_dir).expect("assets dir").count(),
+            0
+        );
+        assert_eq!(
+            fs::read_dir(&store.thumbs_dir).expect("thumbs dir").count(),
+            0
+        );
+    }
+
+    #[test]
+    fn import_trims_custom_names() {
+        let (_temp_dir, store) = setup_store();
+        let source_dir = TempDir::new().expect("source dir");
+        let source_file = source_dir.path().join("trim-me.png");
+        write_png(&source_file, [30, 40, 50, 255]);
+
+        let imported = store
+            .import_items([ImportRequest {
+                path: source_file,
+                name: Some("  Trimmed Name  ".to_string()),
+                original_filename: None,
+            }])
+            .expect("import");
+
+        assert_eq!(imported[0].name, "Trimmed Name");
     }
 
     #[test]

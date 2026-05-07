@@ -2,13 +2,14 @@ use std::{
     cell::{Cell, RefCell},
     path::{Path, PathBuf},
     rc::{Rc, Weak},
-    time::SystemTime,
+    sync::mpsc,
+    time::{Duration, SystemTime},
 };
 
 use anyhow::{Context, Result, anyhow};
 use futures_util::StreamExt;
 use gtk::{
-    Align, Box as GtkBox, Button, CssProvider, Dialog, DrawingArea, DropTarget, Entry,
+    Align, Box as GtkBox, Button, CssProvider, DrawingArea, DropTarget, Entry,
     EventControllerMotion, FileDialog, FileFilter, FlowBox, GestureClick, Label, Orientation,
     Overlay, PolicyType, ScrolledWindow, SearchEntry, SelectionMode, gdk, gio, glib, prelude::*,
 };
@@ -28,8 +29,8 @@ const BASE_CARD_SIZE: i32 = 170;
 const GRID_GAP: i32 = 12;
 const GRID_MARGIN: i32 = 16;
 const DEFAULT_WINDOW_WIDTH: i32 = 1040;
+const GIF_ANIMATION_INTERVAL: Duration = Duration::from_millis(100);
 
-#[derive(Clone)]
 struct AppState {
     store: StickerStore,
     window: adw::ApplicationWindow,
@@ -37,8 +38,17 @@ struct AppState {
     grid: FlowBox,
     status: Label,
     records: Rc<RefCell<Vec<StickerRecord>>>,
+    search_reload_source: RefCell<Option<glib::SourceId>>,
+    gif_tiles: RefCell<Vec<GifTile>>,
+    gif_animation_source: RefCell<Option<glib::SourceId>>,
     display_scale: Rc<Cell<u32>>,
     settings_path: PathBuf,
+}
+
+struct GifTile {
+    area: glib::WeakRef<DrawingArea>,
+    iter: gtk::gdk_pixbuf::PixbufAnimationIter,
+    frame: Rc<RefCell<Option<gtk::gdk_pixbuf::Pixbuf>>>,
 }
 
 fn main() {
@@ -137,6 +147,9 @@ fn build_application_inner(app: &adw::Application) -> Result<()> {
         grid: grid.clone(),
         status: status.clone(),
         records: Rc::new(RefCell::new(Vec::new())),
+        search_reload_source: RefCell::new(None),
+        gif_tiles: RefCell::new(Vec::new()),
+        gif_animation_source: RefCell::new(None),
         display_scale,
         settings_path,
     };
@@ -152,7 +165,7 @@ fn build_application_inner(app: &adw::Application) -> Result<()> {
     }
     {
         let state = state.clone();
-        search.connect_search_changed(move |_| reload_items(&state));
+        search.connect_search_changed(move |_| schedule_reload_items(&state));
     }
 
     reload_items(&state);
@@ -368,6 +381,19 @@ fn install_drag_and_drop(state: &Rc<AppState>) {
     state.window.add_controller(drop_target);
 }
 
+fn schedule_reload_items(state: &Rc<AppState>) {
+    if let Some(source_id) = state.search_reload_source.borrow_mut().take() {
+        source_id.remove();
+    }
+
+    let callback_state = state.clone();
+    let source_id = glib::timeout_add_local_once(Duration::from_millis(150), move || {
+        *callback_state.search_reload_source.borrow_mut() = None;
+        reload_items(&callback_state);
+    });
+    *state.search_reload_source.borrow_mut() = Some(source_id);
+}
+
 fn reload_items(state: &Rc<AppState>) {
     match state.store.list_items(state.search.text().as_str()) {
         Ok(items) => {
@@ -379,6 +405,7 @@ fn reload_items(state: &Rc<AppState>) {
 }
 
 fn rebuild_grid(state: &Rc<AppState>) {
+    state.gif_tiles.borrow_mut().clear();
     while let Some(child) = state.grid.first_child() {
         state.grid.remove(&child);
     }
@@ -443,7 +470,7 @@ fn build_sticker_tile(state: &Rc<AppState>, record: StickerRecord) -> GtkBox {
     actions.append(&spacer);
     actions.append(&delete_button);
 
-    let media = media_canvas(&record, card_size);
+    let media = media_canvas(state, &record, card_size);
     root.set_child(Some(&media));
     root.add_overlay(&actions);
 
@@ -511,7 +538,7 @@ fn build_sticker_tile(state: &Rc<AppState>, record: StickerRecord) -> GtkBox {
     tile
 }
 
-fn media_canvas(record: &StickerRecord, card_size: i32) -> DrawingArea {
+fn media_canvas(state: &Rc<AppState>, record: &StickerRecord, card_size: i32) -> DrawingArea {
     let area = DrawingArea::builder()
         .content_width(card_size)
         .content_height(card_size)
@@ -525,7 +552,7 @@ fn media_canvas(record: &StickerRecord, card_size: i32) -> DrawingArea {
         .build();
     area.set_size_request(card_size, card_size);
 
-    let frame = Rc::new(RefCell::new(load_initial_frame(record)));
+    let frame = Rc::new(RefCell::new(load_grid_frame(record)));
     {
         let frame = frame.clone();
         area.set_draw_func(move |_, cr, width, height| {
@@ -536,30 +563,90 @@ fn media_canvas(record: &StickerRecord, card_size: i32) -> DrawingArea {
     }
 
     if record.kind == "gif" {
-        if let Ok(animation) = gtk::gdk_pixbuf::PixbufAnimation::from_file(&record.asset_path) {
-            let iter = animation.iter(Some(SystemTime::now()));
-            let frame = frame.clone();
-            area.add_tick_callback(move |area, _| {
-                if iter.advance(SystemTime::now()) {
-                    *frame.borrow_mut() = Some(iter.pixbuf());
-                    area.queue_draw();
-                }
-                glib::ControlFlow::Continue
-            });
-        }
+        register_gif_tile(state, &area, record, frame);
     }
 
     area
 }
 
-fn load_initial_frame(record: &StickerRecord) -> Option<gtk::gdk_pixbuf::Pixbuf> {
-    if record.kind == "gif" {
-        return gtk::gdk_pixbuf::PixbufAnimation::from_file(&record.asset_path)
-            .ok()
-            .map(|animation| animation.iter(Some(SystemTime::now())).pixbuf());
+fn load_grid_frame(record: &StickerRecord) -> Option<gtk::gdk_pixbuf::Pixbuf> {
+    gtk::gdk_pixbuf::Pixbuf::from_file(&record.thumb_path)
+        .or_else(|_| gtk::gdk_pixbuf::Pixbuf::from_file(&record.asset_path))
+        .ok()
+}
+
+fn register_gif_tile(
+    state: &Rc<AppState>,
+    area: &DrawingArea,
+    record: &StickerRecord,
+    frame: Rc<RefCell<Option<gtk::gdk_pixbuf::Pixbuf>>>,
+) {
+    let Ok(animation) = gtk::gdk_pixbuf::PixbufAnimation::from_file(&record.asset_path) else {
+        return;
+    };
+
+    state.gif_tiles.borrow_mut().push(GifTile {
+        area: area.downgrade(),
+        iter: animation.iter(Some(SystemTime::now())),
+        frame,
+    });
+    ensure_gif_animation_ticker(state);
+}
+
+fn ensure_gif_animation_ticker(state: &Rc<AppState>) {
+    if state.gif_animation_source.borrow().is_some() {
+        return;
     }
 
-    gtk::gdk_pixbuf::Pixbuf::from_file(&record.asset_path).ok()
+    let weak_state = Rc::downgrade(state);
+    let source_id = glib::timeout_add_local(GIF_ANIMATION_INTERVAL, move || {
+        let Some(state) = weak_state.upgrade() else {
+            return glib::ControlFlow::Break;
+        };
+
+        let mut tiles = state.gif_tiles.borrow_mut();
+        if tiles.is_empty() {
+            *state.gif_animation_source.borrow_mut() = None;
+            return glib::ControlFlow::Break;
+        }
+
+        tiles.retain_mut(|tile| {
+            let Some(area) = tile.area.upgrade() else {
+                return false;
+            };
+
+            if !is_animation_area_visible(&area, &state.window) {
+                return true;
+            }
+
+            if tile.iter.advance(SystemTime::now()) {
+                *tile.frame.borrow_mut() = Some(tile.iter.pixbuf());
+                area.queue_draw();
+            }
+
+            true
+        });
+
+        if tiles.is_empty() {
+            *state.gif_animation_source.borrow_mut() = None;
+            glib::ControlFlow::Break
+        } else {
+            glib::ControlFlow::Continue
+        }
+    });
+    *state.gif_animation_source.borrow_mut() = Some(source_id);
+}
+
+fn is_animation_area_visible(area: &DrawingArea, window: &adw::ApplicationWindow) -> bool {
+    if !area.is_mapped() || !window.is_active() {
+        return false;
+    }
+
+    let Some(bounds) = area.compute_bounds(window) else {
+        return false;
+    };
+
+    bounds.y() + bounds.height() >= 0.0 && bounds.y() <= window.height() as f32
 }
 
 fn draw_pixbuf_cover(
@@ -642,13 +729,42 @@ fn import_paths_with_prompts(state: &Rc<AppState>, paths: Vec<PathBuf>) {
             return;
         }
 
-        match state.store.import_items(requests) {
-            Ok(items) => {
+        import_requests_in_background(&state, requests);
+    });
+}
+
+fn import_requests_in_background(state: &Rc<AppState>, requests: Vec<ImportRequest>) {
+    let count = requests.len();
+    set_status(state, &format!("Importing {count} sticker(s)…"));
+
+    let store = state.store.clone();
+    let (sender, receiver) = mpsc::channel();
+    std::thread::spawn(move || {
+        let _ = sender.send(store.import_items(requests));
+    });
+
+    let state = state.clone();
+    glib::timeout_add_local(Duration::from_millis(50), move || {
+        match receiver.try_recv() {
+            Ok(Ok(items)) => {
                 let count = items.len();
                 reload_items(&state);
                 set_status(&state, &format!("Imported {count} sticker(s)"));
+                glib::ControlFlow::Break
             }
-            Err(error) => show_error(&state, "Import failed", &error.to_string()),
+            Ok(Err(error)) => {
+                show_error(&state, "Import failed", &error.to_string());
+                glib::ControlFlow::Break
+            }
+            Err(mpsc::TryRecvError::Empty) => glib::ControlFlow::Continue,
+            Err(mpsc::TryRecvError::Disconnected) => {
+                show_error(
+                    &state,
+                    "Import failed",
+                    "The import worker stopped unexpectedly.",
+                );
+                glib::ControlFlow::Break
+            }
         }
     });
 }
@@ -807,10 +923,15 @@ fn copy_sticker(state: &Rc<AppState>, id: u64) {
                     gdk::ContentProvider::for_bytes("text/plain;charset=utf-8", &text_bytes),
                 ];
 
-                if record.kind != "gif" {
-                    if let Ok(texture) = gdk::Texture::from_filename(&record.asset_path) {
+                match (
+                    record.kind.as_str(),
+                    gdk::Texture::from_filename(&record.asset_path),
+                ) {
+                    ("gif", _) => {}
+                    (_, Ok(texture)) => {
                         providers.push(gdk::ContentProvider::for_value(&texture.to_value()));
                     }
+                    _ => {}
                 }
 
                 let provider = gdk::ContentProvider::new_union(&providers);
@@ -832,36 +953,32 @@ async fn entry_dialog(
     body: &str,
     initial: &str,
 ) -> Option<String> {
-    let dialog = Dialog::builder()
-        .title(title)
-        .modal(true)
-        .transient_for(parent)
+    let content = GtkBox::builder()
+        .orientation(Orientation::Vertical)
+        .spacing(10)
         .build();
-    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-    dialog.add_button("OK", gtk::ResponseType::Ok);
-    dialog.set_default_response(gtk::ResponseType::Ok);
+    content.append(&Label::builder().label(body).xalign(0.0).wrap(true).build());
 
-    let content = dialog.content_area();
-    content.set_spacing(10);
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-
-    let label = Label::builder().label(body).xalign(0.0).wrap(true).build();
     let entry = Entry::builder()
         .text(initial)
         .activates_default(true)
         .build();
-    content.append(&label);
     content.append(&entry);
 
-    dialog.present();
-    let response = dialog.run_future().await;
-    let value = entry.text().trim().to_string();
-    dialog.close();
+    let dialog = adw::AlertDialog::builder()
+        .heading(title)
+        .extra_child(&content)
+        .close_response("cancel")
+        .default_response("ok")
+        .default_widget(&entry)
+        .focus_widget(&entry)
+        .build();
+    dialog.add_responses(&[("cancel", "Cancel"), ("ok", "OK")]);
 
-    if response == gtk::ResponseType::Ok && !value.is_empty() {
+    let response = dialog.choose_future(Some(parent)).await;
+    let value = entry.text().trim().to_string();
+
+    if response == "ok" && !value.is_empty() {
         Some(value)
     } else {
         None
@@ -874,48 +991,27 @@ async fn confirm_dialog(
     body: &str,
     accept_label: &str,
 ) -> bool {
-    let dialog = Dialog::builder()
-        .title(title)
-        .modal(true)
-        .transient_for(parent)
+    let dialog = adw::AlertDialog::builder()
+        .heading(title)
+        .body(body)
+        .close_response("cancel")
+        .default_response("accept")
         .build();
-    dialog.add_button("Cancel", gtk::ResponseType::Cancel);
-    dialog.add_button(accept_label, gtk::ResponseType::Accept);
+    dialog.add_responses(&[("cancel", "Cancel"), ("accept", accept_label)]);
+    dialog.set_response_appearance("accept", adw::ResponseAppearance::Destructive);
 
-    let content = dialog.content_area();
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    content.append(&Label::builder().label(body).wrap(true).xalign(0.0).build());
-
-    dialog.present();
-    let response = dialog.run_future().await;
-    dialog.close();
-    response == gtk::ResponseType::Accept
+    dialog.choose_future(Some(parent)).await == "accept"
 }
 
 fn show_error(state: &Rc<AppState>, title: &str, message: &str) {
-    let dialog = Dialog::builder()
-        .title(title)
-        .modal(true)
-        .transient_for(&state.window)
+    let dialog = adw::AlertDialog::builder()
+        .heading(title)
+        .body(message)
+        .close_response("ok")
+        .default_response("ok")
         .build();
-    dialog.add_button("OK", gtk::ResponseType::Ok);
-    let content = dialog.content_area();
-    content.set_margin_top(16);
-    content.set_margin_bottom(16);
-    content.set_margin_start(16);
-    content.set_margin_end(16);
-    content.append(
-        &Label::builder()
-            .label(message)
-            .wrap(true)
-            .xalign(0.0)
-            .build(),
-    );
-    dialog.connect_response(|dialog, _| dialog.close());
-    dialog.present();
+    dialog.add_response("ok", "OK");
+    dialog.present(Some(&state.window));
 }
 
 fn show_startup_error(app: &adw::Application, error: &anyhow::Error) {
@@ -1088,7 +1184,7 @@ fn save_display_scale(path: &Path, scale: u32) {
 
 fn install_css() {
     let provider = CssProvider::new();
-    provider.load_from_data(
+    provider.load_from_string(
         ".sticker-tile {
             border-radius: 8px;
             background: @card_bg_color;
