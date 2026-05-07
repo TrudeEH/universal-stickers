@@ -57,5 +57,7 @@ build() {
 package() {
   cd "$pkgname"
 
+  export CARGO_TARGET_DIR="$srcdir/cargo-target"
+
   DESTDIR="$pkgdir" PREFIX=/usr ./scripts/install-linux.sh
 }

@@ -6,7 +6,8 @@ destdir="${DESTDIR:-}"
 bindir="${destdir}${prefix}/bin"
 datadir="${destdir}${prefix}/share"
 build_profile="${BUILD_PROFILE:-release}"
-binary="target/${build_profile}/universal-stickers"
+target_dir="${CARGO_TARGET_DIR:-target}"
+binary="${target_dir}/${build_profile}/universal-stickers"
 
 if [[ ! -x "$binary" ]]; then
     echo "Missing built binary: $binary" >&2

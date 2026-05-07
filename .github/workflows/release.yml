@@ -38,11 +38,12 @@ jobs:
         run: |
           version="$(sed -n 's/^version = "\(.*\)"/\1/p' Cargo.toml | head -n1)"
           mkdir -p dist
-          rm -rf pkgroot
+          rm -rf pkgroot debroot
           DESTDIR="$PWD/pkgroot" PREFIX=/usr ./scripts/install-linux.sh
 
-          mkdir -p pkgroot/DEBIAN
-          cat > pkgroot/DEBIAN/control <<CONTROL
+          cp -a pkgroot debroot
+          mkdir -p debroot/DEBIAN
+          cat > debroot/DEBIAN/control <<CONTROL
           Package: universal-stickers
           Version: ${version}
           Section: utils
@@ -52,7 +53,7 @@ jobs:
           Depends: libadwaita-1-0, libgtk-4-1, xdg-desktop-portal
           Description: Small sticker and GIF picker built with GTK and Rust.
           CONTROL
-          dpkg-deb --build pkgroot "dist/universal-stickers_${version}_amd64.deb"
+          dpkg-deb --build debroot "dist/universal-stickers_${version}_amd64.deb"
 
           mkdir -p rpm/BUILD rpm/RPMS rpm/SOURCES rpm/SPECS rpm/SRPMS
           tar -C pkgroot --owner=0 --group=0 -czf "rpm/SOURCES/universal-stickers-root.tar.gz" .
