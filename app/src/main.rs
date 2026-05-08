@@ -522,22 +522,33 @@ fn build_sticker_tile(state: &Rc<AppState>, record: StickerRecord) -> GtkBox {
             .connect_clicked(move |_| confirm_delete_item(&state, record.id, &record.name));
     }
     {
-        let state = state.clone();
-        let record = record.clone();
-        let click = GestureClick::new();
-        click.connect_pressed({
-            let tile = tile.clone();
-            move |_, _, _, _| tile.add_css_class("pressed")
-        });
-        click.connect_stopped({
-            let tile = tile.clone();
-            move |_| tile.remove_css_class("pressed")
-        });
-        click.connect_released(move |_, _, _, _| copy_sticker(&state, record.id));
-        media.add_controller(click);
+        add_copy_click_controller(&media, &tile, state, record.id);
+        add_copy_click_controller(&name, &tile, state, record.id);
     }
 
     tile
+}
+
+fn add_copy_click_controller<W: IsA<gtk::Widget>>(
+    widget: &W,
+    tile: &GtkBox,
+    state: &Rc<AppState>,
+    record_id: u64,
+) {
+    let click = GestureClick::new();
+    click.connect_pressed({
+        let tile = tile.clone();
+        move |_, _, _, _| tile.add_css_class("pressed")
+    });
+    click.connect_stopped({
+        let tile = tile.clone();
+        move |_| tile.remove_css_class("pressed")
+    });
+    click.connect_released({
+        let state = state.clone();
+        move |_, _, _, _| copy_sticker(&state, record_id)
+    });
+    widget.add_controller(click);
 }
 
 fn media_canvas(state: &Rc<AppState>, record: &StickerRecord, card_size: i32) -> DrawingArea {
