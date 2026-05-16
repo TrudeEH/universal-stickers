@@ -4,6 +4,8 @@ Small sticker/GIF picker built with GTK, libadwaita, and Rust.
 
 ![screenshot](image.png)
 
+[Download Universal Stickers](https://github.com/TrudeEH/universal-stickers/releases/latest)
+
 ## Features
 
 - Store imported images and GIFs in its own library
