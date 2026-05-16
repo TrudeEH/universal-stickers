@@ -2,15 +2,16 @@
 
 Small sticker/GIF picker built with GTK, libadwaita, and Rust.
 
+![screenshot](image.png)
+
 ## Features
 
 - Store imported images and GIFs in its own library
 - Search stickers in a searchable responsive grid
 - Rename or delete stickers
-- Drag-and-drop import support
-- Copy selected sticker paths to the clipboard for use in other apps
+- Drag-and-drop support
+- Copy selected sticker/GIF to the clipboard for use in other apps
 - Export/import backups
-- GNOME global shortcut support through the desktop portal when available
 
 ## Project Layout
 
@@ -112,15 +113,3 @@ makepkg -si
 The release workflow also builds a `.pkg.tar.zst` artifact from this recipe.
 For AUR publishing, upload `PKGBUILD` and a regenerated `.SRCINFO` to
 `ssh://aur@aur.archlinux.org/universal-stickers-git.git`.
-
-## Data Compatibility
-
-The GTK rewrite intentionally keeps the existing local data location and storage
-format. Existing Linux libraries under:
-
-```text
-~/.local/share/UniversalStickers/Universal Stickers
-```
-
-continue to use the same `stickers.db`, `assets/`, `thumbs/`, and backup
-manifest format.
