@@ -30,7 +30,6 @@ The GTK desktop app needs:
 - GTK 4 development files
 - libadwaita development files
 - pkg-config
-- Optional: `xdg-desktop-portal-gnome` for the Ctrl+Meta+Space global shortcut on GNOME
 
 The Rust core uses bundled SQLite through `rusqlite`, so SQLite development files are not required.
 
