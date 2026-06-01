@@ -31,7 +31,6 @@ const BASE_CARD_SIZE: i32 = 170;
 const GRID_GAP: i32 = 12;
 const GRID_MARGIN: i32 = 16;
 const DEFAULT_WINDOW_WIDTH: i32 = 1040;
-const GIF_ANIMATION_INTERVAL: Duration = Duration::from_millis(100);
 
 struct AppState {
     store: StickerStore,
@@ -41,16 +40,18 @@ struct AppState {
     status: Label,
     records: Rc<RefCell<Vec<StickerRecord>>>,
     search_reload_source: RefCell<Option<glib::SourceId>>,
-    gif_tiles: RefCell<Vec<GifTile>>,
-    gif_animation_source: RefCell<Option<glib::SourceId>>,
+    active_gif: RefCell<Option<ActiveGifPlayback>>,
+    next_gif_token: Cell<u64>,
     display_scale: Rc<Cell<u32>>,
     settings_path: PathBuf,
 }
 
-struct GifTile {
+struct ActiveGifPlayback {
     area: glib::WeakRef<DrawingArea>,
-    iter: gtk::gdk_pixbuf::PixbufAnimationIter,
     frame: Rc<RefCell<Option<gtk::gdk_pixbuf::Pixbuf>>>,
+    thumbnail: Option<gtk::gdk_pixbuf::Pixbuf>,
+    source_id: Option<glib::SourceId>,
+    token: u64,
 }
 
 fn main() {
@@ -150,8 +151,8 @@ fn build_application_inner(app: &adw::Application) -> Result<()> {
         status: status.clone(),
         records: Rc::new(RefCell::new(Vec::new())),
         search_reload_source: RefCell::new(None),
-        gif_tiles: RefCell::new(Vec::new()),
-        gif_animation_source: RefCell::new(None),
+        active_gif: RefCell::new(None),
+        next_gif_token: Cell::new(1),
         display_scale,
         settings_path,
     };
@@ -407,7 +408,6 @@ fn reload_items(state: &Rc<AppState>) {
 }
 
 fn rebuild_grid(state: &Rc<AppState>) {
-    state.gif_tiles.borrow_mut().clear();
     while let Some(child) = state.grid.first_child() {
         state.grid.remove(&child);
     }
@@ -472,9 +472,19 @@ fn build_sticker_tile(state: &Rc<AppState>, record: StickerRecord) -> GtkBox {
     actions.append(&spacer);
     actions.append(&delete_button);
 
-    let media = media_canvas(state, &record, card_size);
+    let (media, media_frame) = media_canvas(&record, card_size);
     root.set_child(Some(&media));
     root.add_overlay(&actions);
+
+    let format_badge = Label::builder()
+        .label(&sticker_format_label(&record))
+        .halign(Align::End)
+        .valign(Align::End)
+        .margin_end(6)
+        .margin_bottom(6)
+        .css_classes(["sticker-format-badge"])
+        .build();
+    root.add_overlay(&format_badge);
 
     let name = Label::builder()
         .label(&record.name)
@@ -490,6 +500,10 @@ fn build_sticker_tile(state: &Rc<AppState>, record: StickerRecord) -> GtkBox {
         .build();
     name.set_visible(false);
     root.add_overlay(&name);
+
+    if record.kind == "gif" {
+        register_gif_tile(state, &root, &media, &record, media_frame);
+    }
 
     tile.append(&root);
 
@@ -524,6 +538,8 @@ fn build_sticker_tile(state: &Rc<AppState>, record: StickerRecord) -> GtkBox {
     {
         add_copy_click_controller(&media, &tile, state, record.id);
         add_copy_click_controller(&name, &tile, state, record.id);
+        add_copy_click_controller(&spacer, &tile, state, record.id);
+        add_copy_click_controller(&format_badge, &tile, state, record.id);
     }
 
     tile
@@ -551,7 +567,10 @@ fn add_copy_click_controller<W: IsA<gtk::Widget>>(
     widget.add_controller(click);
 }
 
-fn media_canvas(state: &Rc<AppState>, record: &StickerRecord, card_size: i32) -> DrawingArea {
+fn media_canvas(
+    record: &StickerRecord,
+    card_size: i32,
+) -> (DrawingArea, Rc<RefCell<Option<gtk::gdk_pixbuf::Pixbuf>>>) {
     let area = DrawingArea::builder()
         .content_width(card_size)
         .content_height(card_size)
@@ -575,11 +594,7 @@ fn media_canvas(state: &Rc<AppState>, record: &StickerRecord, card_size: i32) ->
         });
     }
 
-    if record.kind == "gif" {
-        register_gif_tile(state, &area, record, frame);
-    }
-
-    area
+    (area, frame)
 }
 
 fn load_grid_frame(record: &StickerRecord) -> Option<gtk::gdk_pixbuf::Pixbuf> {
@@ -588,78 +603,195 @@ fn load_grid_frame(record: &StickerRecord) -> Option<gtk::gdk_pixbuf::Pixbuf> {
         .ok()
 }
 
-fn register_gif_tile(
+fn register_gif_tile<W: IsA<gtk::Widget>>(
     state: &Rc<AppState>,
+    hover_widget: &W,
     area: &DrawingArea,
     record: &StickerRecord,
     frame: Rc<RefCell<Option<gtk::gdk_pixbuf::Pixbuf>>>,
 ) {
-    let Ok(animation) = gtk::gdk_pixbuf::PixbufAnimation::from_file(&record.asset_path) else {
-        return;
-    };
+    let asset_path = PathBuf::from(&record.asset_path);
+    let thumbnail = frame.borrow().clone();
+    let motion = EventControllerMotion::new();
 
-    state.gif_tiles.borrow_mut().push(GifTile {
-        area: area.downgrade(),
-        iter: animation.iter(Some(SystemTime::now())),
-        frame,
-    });
-    ensure_gif_animation_ticker(state);
+    {
+        let state = state.clone();
+        let area = area.clone();
+        let asset_path = asset_path.clone();
+        let frame = frame.clone();
+        let thumbnail = thumbnail.clone();
+        motion.connect_enter(move |_, _, _| {
+            start_gif_playback(&state, &area, &asset_path, frame.clone(), thumbnail.clone());
+        });
+    }
+
+    {
+        let state = state.clone();
+        let area = area.clone();
+        motion.connect_leave(move |_| stop_gif_playback_for_area(&state, &area));
+    }
+
+    hover_widget.add_controller(motion);
 }
 
-fn ensure_gif_animation_ticker(state: &Rc<AppState>) {
-    if state.gif_animation_source.borrow().is_some() {
+fn start_gif_playback(
+    state: &Rc<AppState>,
+    area: &DrawingArea,
+    asset_path: &Path,
+    frame: Rc<RefCell<Option<gtk::gdk_pixbuf::Pixbuf>>>,
+    thumbnail: Option<gtk::gdk_pixbuf::Pixbuf>,
+) {
+    let already_active = state
+        .active_gif
+        .borrow()
+        .as_ref()
+        .and_then(|active| active.area.upgrade())
+        .is_some_and(|active_area| active_area == *area);
+    if already_active {
         return;
     }
 
+    stop_active_gif_playback(state);
+
+    let Ok(animation) = gtk::gdk_pixbuf::PixbufAnimation::from_file(asset_path) else {
+        return;
+    };
+
+    let token = state.next_gif_token.get();
+    state.next_gif_token.set(token.wrapping_add(1).max(1));
+
+    let iter = Rc::new(RefCell::new(animation.iter(Some(SystemTime::now()))));
+    *frame.borrow_mut() = Some(iter.borrow().pixbuf());
+    area.queue_draw();
+
+    *state.active_gif.borrow_mut() = Some(ActiveGifPlayback {
+        area: area.downgrade(),
+        frame: frame.clone(),
+        thumbnail,
+        source_id: None,
+        token,
+    });
+
+    schedule_next_gif_frame(state, area.downgrade(), iter, frame, token);
+}
+
+fn stop_gif_playback_for_area(state: &Rc<AppState>, area: &DrawingArea) {
+    let should_stop = state
+        .active_gif
+        .borrow()
+        .as_ref()
+        .and_then(|active| active.area.upgrade())
+        .is_some_and(|active_area| active_area == *area);
+
+    if should_stop {
+        stop_active_gif_playback(state);
+    }
+}
+
+fn stop_active_gif_playback(state: &Rc<AppState>) {
+    let Some(mut active) = state.active_gif.borrow_mut().take() else {
+        return;
+    };
+
+    if let Some(source_id) = active.source_id.take() {
+        source_id.remove();
+    }
+
+    *active.frame.borrow_mut() = active.thumbnail.take();
+    if let Some(area) = active.area.upgrade() {
+        area.queue_draw();
+    }
+}
+
+fn schedule_next_gif_frame(
+    state: &Rc<AppState>,
+    area: glib::WeakRef<DrawingArea>,
+    iter: Rc<RefCell<gtk::gdk_pixbuf::PixbufAnimationIter>>,
+    frame: Rc<RefCell<Option<gtk::gdk_pixbuf::Pixbuf>>>,
+    token: u64,
+) {
+    if !is_active_gif_token(state, token) {
+        return;
+    }
+
+    let delay = gif_frame_delay(iter.borrow().delay_time());
     let weak_state = Rc::downgrade(state);
-    let source_id = glib::timeout_add_local(GIF_ANIMATION_INTERVAL, move || {
+    let area_for_timeout = area.clone();
+    let iter_for_timeout = iter.clone();
+    let frame_for_timeout = frame.clone();
+    let source_id = glib::timeout_add_local_once(delay, move || {
         let Some(state) = weak_state.upgrade() else {
-            return glib::ControlFlow::Break;
+            return;
+        };
+        clear_active_gif_source(&state, token);
+        if !is_active_gif_token(&state, token) {
+            return;
+        }
+        let Some(area) = area_for_timeout.upgrade() else {
+            stop_active_gif_playback(&state);
+            return;
         };
 
-        let mut tiles = state.gif_tiles.borrow_mut();
-        if tiles.is_empty() {
-            *state.gif_animation_source.borrow_mut() = None;
-            return glib::ControlFlow::Break;
+        let iter = iter_for_timeout.borrow_mut();
+        if iter.advance(SystemTime::now()) {
+            *frame_for_timeout.borrow_mut() = Some(iter.pixbuf());
+            area.queue_draw();
         }
+        drop(iter);
 
-        tiles.retain_mut(|tile| {
-            let Some(area) = tile.area.upgrade() else {
-                return false;
-            };
-
-            if !is_animation_area_visible(&area, &state.window) {
-                return true;
-            }
-
-            if tile.iter.advance(SystemTime::now()) {
-                *tile.frame.borrow_mut() = Some(tile.iter.pixbuf());
-                area.queue_draw();
-            }
-
-            true
-        });
-
-        if tiles.is_empty() {
-            *state.gif_animation_source.borrow_mut() = None;
-            glib::ControlFlow::Break
-        } else {
-            glib::ControlFlow::Continue
-        }
+        schedule_next_gif_frame(
+            &state,
+            area.downgrade(),
+            iter_for_timeout,
+            frame_for_timeout,
+            token,
+        );
     });
-    *state.gif_animation_source.borrow_mut() = Some(source_id);
+
+    if let Some(active) = state.active_gif.borrow_mut().as_mut() {
+        if active.token == token {
+            active.source_id = Some(source_id);
+        } else {
+            source_id.remove();
+        }
+    } else {
+        source_id.remove();
+    }
 }
 
-fn is_animation_area_visible(area: &DrawingArea, window: &adw::ApplicationWindow) -> bool {
-    if !area.is_mapped() || !window.is_active() {
-        return false;
+fn is_active_gif_token(state: &Rc<AppState>, token: u64) -> bool {
+    state
+        .active_gif
+        .borrow()
+        .as_ref()
+        .is_some_and(|active| active.token == token)
+}
+
+fn clear_active_gif_source(state: &Rc<AppState>, token: u64) {
+    if let Some(active) = state.active_gif.borrow_mut().as_mut() {
+        if active.token == token {
+            active.source_id = None;
+        }
+    }
+}
+
+fn gif_frame_delay(delay: Option<Duration>) -> Duration {
+    delay
+        .unwrap_or_else(|| Duration::from_millis(100))
+        .max(Duration::from_millis(10))
+}
+
+fn sticker_format_label(record: &StickerRecord) -> String {
+    if record.kind == "gif" {
+        return "gif".to_string();
     }
 
-    let Some(bounds) = area.compute_bounds(window) else {
-        return false;
-    };
-
-    bounds.y() + bounds.height() >= 0.0 && bounds.y() <= window.height() as f32
+    Path::new(&record.original_filename)
+        .extension()
+        .or_else(|| Path::new(&record.asset_path).extension())
+        .and_then(|value| value.to_str())
+        .map(|value| value.to_ascii_lowercase())
+        .unwrap_or_else(|| record.kind.replace("_image", ""))
 }
 
 fn draw_pixbuf_cover(
@@ -1232,6 +1364,14 @@ fn install_css() {
             color: white;
             padding: 5px 7px;
             font-weight: 600;
+        }
+        .sticker-format-badge {
+            border-radius: 999px;
+            background: alpha(black, 0.62);
+            color: white;
+            padding: 2px 6px;
+            font-size: 10px;
+            font-weight: 700;
         }",
     );
 
