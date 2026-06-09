@@ -22,6 +22,7 @@ Small sticker/GIF picker built with GTK, libadwaita, and Rust.
 - `desktop/packaging/`: Linux desktop metadata, Flatpak manifest, and Arch/AUR recipe.
 - `run.sh`: Linux helper script that builds and runs the app.
 - `run.ps1`: Windows helper script that builds and runs the Rust app when GTK runtime dependencies are available.
+- `scripts/package-windows-msys2.sh`: MSYS2 release helper that creates a self-contained Windows zip with GTK/libadwaita DLLs and data files bundled.
 
 ## Dependencies
 
@@ -79,6 +80,25 @@ The desktop executable is:
 
 - Linux: `target/debug/universal-stickers`
 - Windows: `target\debug\universal-stickers.exe`
+
+## Windows Packaging
+
+Release builds publish `universal-stickers-windows.zip` as a self-contained
+Windows folder. The zip includes `universal-stickers.exe`, all recursively
+detected MSYS2/MINGW runtime DLL dependencies, GTK/libadwaita runtime data
+(`etc/`, `lib/`, `share/`, and `var/cache/fontconfig`), and a `Universal
+Stickers.cmd` launcher that sets GTK and GSettings lookup paths before starting
+the app. Users should keep the extracted folder intact and launch the CMD file
+if double-clicking the EXE cannot find GTK resources.
+
+To create the same zip locally from an MSYS2 MINGW64 shell, install the build
+and packaging dependencies and run:
+
+```bash
+pacman -S --needed mingw-w64-x86_64-rust mingw-w64-x86_64-pkgconf mingw-w64-x86_64-gtk4 mingw-w64-x86_64-libadwaita mingw-w64-x86_64-ntldd mingw-w64-x86_64-sqlite3 zip
+cargo build --release --locked -p universal-stickers
+./scripts/package-windows-msys2.sh target/release/universal-stickers.exe dist/universal-stickers-windows dist/universal-stickers-windows.zip
+```
 
 ## Tests
 
