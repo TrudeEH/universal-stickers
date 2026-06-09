@@ -178,6 +178,7 @@ jobs:
             mingw-w64-x86_64-pkgconf
             mingw-w64-x86_64-gtk4
             mingw-w64-x86_64-libadwaita
+            mingw-w64-x86_64-ntldd
             mingw-w64-x86_64-sqlite3
             zip
 
@@ -185,12 +186,7 @@ jobs:
         run: cargo build --release --locked -p universal-stickers
 
       - name: Package Windows artifact
-        run: |
-          mkdir -p dist/universal-stickers-windows
-          cp target/release/universal-stickers.exe dist/universal-stickers-windows/
-          cp README.md LICENSE.txt dist/universal-stickers-windows/
-          cd dist
-          zip -r universal-stickers-windows.zip universal-stickers-windows
+        run: ./scripts/package-windows-msys2.sh target/release/universal-stickers.exe dist/universal-stickers-windows dist/universal-stickers-windows.zip
 
       - name: Upload Windows artifact
         uses: actions/upload-artifact@v4
